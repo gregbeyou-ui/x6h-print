@@ -28,8 +28,8 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 - **Depuis Bluefy sur l'iPhone** : la page indique que l'impression est faite, mais rien ne sort.
   - Premier essai : la liaison s'est coupée en pleine impression (erreur `writeChar … null`), c'est corrigé.
-  - Deuxième essai : plus d'erreur, mais rien n'est imprimé. Cause non trouvée.
-  - Dernière version publiée (`3e1b8fc`) : après une coupure, la page renvoie les réglages de début ; à la fin, elle affiche un rapport du type « pauses : 0, reconnexions : 1, messages reçus : 2, état avant : 00, après : 00 ».
+  - Deuxième essai : seulement quelques millimètres imprimés, avec l'ancien message « pauses demandées : 0 », donc une ancienne version de la page encore en mémoire. Cause probable : l'iPhone jette ce qu'on lui envoie trop vite.
+  - **Version v5** (numéro affiché en bas de la page) : les lignes sont regroupées par envois de 177 octets, avec un rythme réglable dans « Réglages avancés → Rythme d'envoi Bluetooth » (Lent par défaut sur iPhone). Après une coupure, la page renvoie les réglages de début. À la fin, elle affiche un rapport « pauses, reconnexions, messages reçus, état ».
 - **Mode gris depuis Chrome** : des bandes de 20 lignes manquaient. L'envoi a été ralenti, mais ce n'est pas encore réimprimé.
 
 ---
@@ -37,11 +37,12 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 ## Prochaine chose à faire
 
 1. Éteindre puis rallumer l'imprimante (elle peut être bloquée par l'impression interrompue).
-2. Dans Bluefy, recharger la page, se connecter, imprimer une photo en **N&B**.
-3. **Noter le message de fin** (pauses, reconnexions, messages reçus, état) et le donner à Claude :
+2. Dans Bluefy, recharger la page et **vérifier qu'il est écrit « Version 13/11 – v5 » tout en bas**. Sinon, attendre quelques minutes et recharger.
+3. Se connecter, imprimer une photo en **N&B**. Si elle s'arrête encore trop tôt, essayer un rythme encore plus lent (à ajouter dans le code si « Lent » ne suffit pas).
+4. **Noter le message de fin** (pauses, reconnexions, messages reçus, état) et le donner à Claude :
    - « l'imprimante ne répond pas » ou « messages reçus : 0 » : Bluefy ne reçoit rien de l'imprimante, et il faut chercher du côté de la liaison iPhone ;
    - un état autre que `00` : l'imprimante signale peut-être un problème (papier, batterie, surchauffe).
-4. Pour comparer, imprimer la même photo depuis Chrome sur le PC : si ça sort, le problème est propre à l'iPhone.
+5. Pour comparer, imprimer la même photo depuis Chrome sur le PC : si ça sort, le problème est propre à l'iPhone.
 
 ---
 
