@@ -15,34 +15,35 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 |---|---|
 | 1. Imprimer depuis le PC (Python) | ✅ Faite |
 | 2. Décompiler Tiny Print | ✅ Faite |
-| 3. Mettre à jour `index.html` | ✅ Faite, mais l'impression depuis l'iPhone reste à faire fonctionner |
-| 4. Mise en ligne sur GitHub Pages | ✅ Faite |
+| 3. Mettre à jour `index.html` | ✅ Faite |
+| 4. Mise en ligne sur GitHub Pages | ✅ Faite — **l'iPhone imprime une photo en entier (N&B, version v5)** |
 | 5. Relais pour les invités (PC, puis ESP32) | ⏳ Pas commencée |
 
 ### Ce qui marche
 
+- **Depuis l'iPhone avec Bluefy (version v5)** : une photo en N&B sort en entier. 🎉
 - **Depuis le PC avec Python** : noir et blanc et niveaux de gris impriment correctement.
 - **Depuis Chrome sur le PC** : le noir et blanc imprime une photo complète et propre.
 
-### Ce qui ne marche pas encore
+### Ce qui a fallu corriger pour l'iPhone
 
-- **Depuis Bluefy sur l'iPhone** : la page indique que l'impression est faite, mais rien ne sort.
-  - Premier essai : la liaison s'est coupée en pleine impression (erreur `writeChar … null`), c'est corrigé.
-  - Deuxième essai : seulement quelques millimètres imprimés, avec l'ancien message « pauses demandées : 0 », donc une ancienne version de la page encore en mémoire. Cause probable : l'iPhone jette ce qu'on lui envoie trop vite.
-  - **Version v5** (numéro affiché en bas de la page) : les lignes sont regroupées par envois de 177 octets, avec un rythme réglable dans « Réglages avancés → Rythme d'envoi Bluetooth » (Lent par défaut sur iPhone). Après une coupure, la page renvoie les réglages de début. À la fin, elle affiche un rapport « pauses, reconnexions, messages reçus, état ».
-- **Mode gris depuis Chrome** : des bandes de 20 lignes manquaient. L'envoi a été ralenti, mais ce n'est pas encore réimprimé.
+- La liaison Bluetooth se coupe pendant les moments d'inactivité : la page se reconnecte toute seule à l'impression, et renvoie les réglages de début si la coupure arrive en pleine impression.
+- L'iPhone jette sans prévenir ce qu'on lui envoie trop vite (seuls quelques millimètres sortaient) : les lignes sont regroupées par envois de 177 octets, avec un rythme réglable dans « Réglages avancés → Rythme d'envoi Bluetooth » (**Lent** par défaut sur iPhone).
+- Bluefy et GitHub gardent l'ancienne page en mémoire quelques minutes : le numéro de version est affiché tout en bas de la page.
+
+### Pas encore vérifié
+
+- **Mode Gris depuis l'iPhone** : jamais essayé.
+- **Mode Gris depuis Chrome** : des bandes de 20 lignes manquaient au premier essai ; l'envoi a été ralenti et regroupé depuis, pas encore réimprimé.
+- Si le rythme « Normal », plus rapide, suffit aussi sur iPhone.
 
 ---
 
 ## Prochaine chose à faire
 
-1. Éteindre puis rallumer l'imprimante (elle peut être bloquée par l'impression interrompue).
-2. Dans Bluefy, recharger la page et **vérifier qu'il est écrit « Version 13/11 – v5 » tout en bas**. Sinon, attendre quelques minutes et recharger.
-3. Se connecter, imprimer une photo en **N&B**. Si elle s'arrête encore trop tôt, essayer un rythme encore plus lent (à ajouter dans le code si « Lent » ne suffit pas).
-4. **Noter le message de fin** (pauses, reconnexions, messages reçus, état) et le donner à Claude :
-   - « l'imprimante ne répond pas » ou « messages reçus : 0 » : Bluefy ne reçoit rien de l'imprimante, et il faut chercher du côté de la liaison iPhone ;
-   - un état autre que `00` : l'imprimante signale peut-être un problème (papier, batterie, surchauffe).
-5. Pour comparer, imprimer la même photo depuis Chrome sur le PC : si ça sort, le problème est propre à l'iPhone.
+1. Dans Bluefy, imprimer la même photo en mode **Gris** et vérifier qu'elle sort en entier, sans bandes manquantes.
+2. Si elle est coupée ou a des trous : noter le message de fin et la longueur imprimée, et les donner à Claude.
+3. Ensuite : étape 5, le relais pour les invités.
 
 ---
 
