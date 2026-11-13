@@ -31,6 +31,11 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - L'iPhone jette sans prévenir ce qu'on lui envoie trop vite (seuls quelques millimètres sortaient) : les lignes sont regroupées par envois de 177 octets, avec un rythme réglable dans « Réglages avancés → Rythme d'envoi Bluetooth » (**Lent** par défaut sur iPhone).
 - Bluefy et GitHub gardent l'ancienne page en mémoire quelques minutes : le numéro de version est affiché tout en bas de la page.
 
+### Android
+
+- Essai sur le téléphone d'un ami : « Web Bluetooth API globally disabled ». Ce n'est pas l'imprimante : c'est son navigateur qui bloque le Bluetooth web (Brave, Samsung Internet, ou navigateur intégré de WhatsApp, Instagram ou Messenger). Une page ne peut pas le réactiver.
+- **Version v6** : la page détecte ce cas dès l'ouverture, explique quoi faire, et propose sur Android un bouton « Ouvrir dans Chrome ». Pas encore réessayé sur un Android.
+
 ### Pas encore vérifié
 
 - **Mode Gris depuis l'iPhone** : jamais essayé.

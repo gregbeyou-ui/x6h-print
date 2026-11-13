@@ -8,6 +8,7 @@
 <style>
   :root { --bg:#f4f1ea; --card:#fff; --ink:#1d1d1f; --muted:#6e6e73; --accent:#1d1d1f; --ok:#2e7d32; --err:#c62828; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
   body { margin:0; font-family:-apple-system, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
   main { max-width:480px; margin:0 auto; padding:20px 16px 40px; }
   h1 { font-size:22px; margin:4px 0 16px; }
@@ -25,6 +26,8 @@
   #canvas { width:100%; max-width:384px; image-rendering:pixelated; }
   .empty { color:var(--muted); font-size:14px; }
   .hint { color:var(--muted); font-size:13px; margin-top:8px; }
+  .help { background:#fff4e5; border-radius:12px; padding:12px; margin-top:12px; font-size:14px; line-height:1.4; }
+  .help a.filebtn { margin-top:10px; text-decoration:none; }
   label { display:flex; justify-content:space-between; font-size:14px; margin:12px 0 4px; }
   input[type=range] { width:100%; }
   input[type=text], select { width:100%; font-size:16px; padding:10px; border-radius:10px; border:1px solid #ccc; background:#fff; }
@@ -41,6 +44,10 @@
   <div class="card">
     <button id="connectBtn">Connecter l'imprimante</button>
     <div id="status">Non connectée</div>
+    <div id="btHelp" class="help" hidden>
+      <div id="btHelpText"></div>
+      <a id="openChrome" class="filebtn" hidden>Ouvrir dans Chrome</a>
+    </div>
   </div>
 
   <!-- 2. Photo -->
@@ -134,7 +141,7 @@ const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gri
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
 const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '13/11 – v5';
+const VERSION = '13/11 – v6';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -206,10 +213,52 @@ function withTimeout(promise, ms) {
     setTimeout(() => ko(new Error('pas de réponse de l\'imprimante')), ms))]);
 }
 
+/* ---------------------------------------------------------------------
+   AIDE QUAND LE NAVIGATEUR BLOQUE LE BLUETOOTH
+   Une page web ne peut pas réactiver le Bluetooth d'un navigateur qui l'a
+   désactivé : on explique quoi faire, et sur Android on propose de rouvrir
+   la page dans Chrome.
+   --------------------------------------------------------------------- */
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+
+function showBluetoothHelp() {
+  let text;
+  if (IS_IOS) {
+    text = "Sur iPhone, Safari et Chrome ne gèrent pas le Bluetooth. " +
+           "Installe l'appli gratuite <b>Bluefy</b> (App Store) et ouvre cette page dedans.";
+  } else if (IS_ANDROID) {
+    text = "Ce navigateur bloque le Bluetooth. Ouvre la page dans <b>Google Chrome</b> " +
+           "(pas depuis WhatsApp, Instagram ou Messenger, ni dans Brave ou Samsung Internet). " +
+           "Vérifie aussi que le <b>Bluetooth</b> et la <b>Localisation</b> du téléphone sont activés.";
+  } else {
+    text = "Ce navigateur bloque le Bluetooth. Ouvre la page dans <b>Google Chrome</b> ou " +
+           "<b>Microsoft Edge</b>, et vérifie que le Bluetooth de l'ordinateur est activé.";
+  }
+  document.getElementById('btHelpText').innerHTML = text;
+  const btn = document.getElementById('openChrome');
+  if (IS_ANDROID) {
+    // Lien spécial Android : rouvre cette même adresse dans l'appli Chrome
+    btn.href = 'intent://' + location.host + location.pathname +
+               '#Intent;scheme=https;package=com.android.chrome;end';
+    btn.hidden = false;
+  }
+  document.getElementById('btHelp').hidden = false;
+}
+
+// Au chargement : on prévient tout de suite si le Bluetooth web est indisponible
+(async () => {
+  if (!navigator.bluetooth) return showBluetoothHelp();
+  try {
+    if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability()))
+      showBluetoothHelp();
+  } catch (_) { showBluetoothHelp(); }
+})();
+
 // 1) Choisir l'imprimante dans la liste (une seule fois)
 async function connect() {
   if (!navigator.bluetooth) {
-    setStatus("Ce navigateur ne gère pas le Bluetooth. Ouvre la page dans Bluefy.", 'err');
+    setStatus("Ce navigateur ne gère pas le Bluetooth.", 'err');
+    showBluetoothHelp();
     return;
   }
   try {
@@ -229,8 +278,17 @@ async function connect() {
     await ensureConnected();
     setStatus('Connectée à ' + (device.name || 'l\'imprimante') + ' ✓', 'ok');
   } catch (e) {
-    setStatus('Connexion impossible : ' + e.message +
-      '. Ferme Tiny Print, éteins et rallume l\'imprimante, puis réessaie.', 'err');
+    const msg = String(e && e.message || e);
+    if (/globally disabled|not available|not supported|NotFoundError: Bluetooth adapter|adapter not available|Bluetooth is disabled/i.test(msg)) {
+      // Le navigateur (ou le téléphone) bloque le Bluetooth : rien à voir avec l'imprimante
+      setStatus('Le Bluetooth est bloqué sur ce navigateur ou ce téléphone.', 'err');
+      showBluetoothHelp();
+    } else if (/cancel/i.test(msg) || (e && e.name === 'NotFoundError')) {
+      setStatus('Aucune imprimante choisie. Allume-la, puis réessaie.', 'err');
+    } else {
+      setStatus('Connexion impossible : ' + msg +
+        '. Ferme Tiny Print, éteins et rallume l\'imprimante, puis réessaie.', 'err');
+    }
   }
   updateButtons();
 }

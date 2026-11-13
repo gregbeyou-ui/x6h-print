@@ -7,7 +7,7 @@ Une page web pour imprimer des photos sur une mini-imprimante thermique Bluetoot
 ## Utilisation
 
 - **iPhone** : ouvrir la page dans le navigateur **Bluefy** (Safari ne gère pas le Bluetooth).
-- **Android / ordinateur** : ouvrir la page dans **Chrome**.
+- **Android / ordinateur** : ouvrir la page dans **Chrome** (ou Edge sur ordinateur). Les navigateurs intégrés à WhatsApp, Instagram ou Messenger, ainsi que Brave et Samsung Internet, bloquent le Bluetooth : la page le détecte et propose « Ouvrir dans Chrome ». Sur Android, le Bluetooth **et la Localisation** doivent être activés.
 
 1. Allumer l'imprimante et fermer l'appli Tiny Print.
 2. **Connecter l'imprimante**, choisir l'appareil dont le nom commence par `X6h`.
