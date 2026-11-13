@@ -1,0 +1,7 @@
+# Ne pas publier : code décompilé de Tiny Print, outils, fichiers de travail
+tinyprint/
+outils/
+apercu.png
+PROMPT_CLAUDE_CODE.md
+TROUVAILLES_TINYPRINT.md
+__pycache__/

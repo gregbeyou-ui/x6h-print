@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>X6h Print</title>
+<style>
+  :root { --bg:#f4f1ea; --card:#fff; --ink:#1d1d1f; --muted:#6e6e73; --accent:#1d1d1f; --ok:#2e7d32; --err:#c62828; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:480px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:22px; margin:4px 0 16px; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  button, .filebtn { display:block; width:100%; border:0; border-radius:12px; padding:15px; font-size:17px; font-weight:600;
+           background:var(--accent); color:#fff; text-align:center; cursor:pointer; }
+  button.secondary, .filebtn.secondary { background:#e8e6e0; color:var(--ink); }
+  button:disabled { opacity:.35; }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; }
+  #status { font-size:14px; color:var(--muted); margin-top:10px; text-align:center; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--err); }
+  input[type=file] { display:none; }
+  .preview { background:#fff; display:flex; justify-content:center; padding:12px 0; border-radius:12px; border:1px dashed #ccc; min-height:120px; align-items:center; }
+  #canvas { width:100%; max-width:384px; image-rendering:pixelated; }
+  .empty { color:var(--muted); font-size:14px; }
+  .hint { color:var(--muted); font-size:13px; margin-top:8px; }
+  label { display:flex; justify-content:space-between; font-size:14px; margin:12px 0 4px; }
+  input[type=range] { width:100%; }
+  input[type=text] { width:100%; font-size:16px; padding:10px; border-radius:10px; border:1px solid #ccc; }
+  details summary { font-size:14px; color:var(--muted); cursor:pointer; margin-top:10px; }
+  .progress { height:6px; background:#e8e6e0; border-radius:3px; overflow:hidden; margin-top:10px; }
+  .progress > div { height:100%; width:0; background:var(--accent); transition:width .1s; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🧾 X6h Print</h1>
+
+  <!-- 1. Connexion -->
+  <div class="card">
+    <button id="connectBtn">Connecter l'imprimante</button>
+    <div id="status">Non connectée</div>
+  </div>
+
+  <!-- 2. Photo -->
+  <div class="card">
+    <div class="row">
+      <label class="filebtn">📷 Photo<input type="file" id="camInput" accept="image/*" capture="environment"></label>
+      <label class="filebtn secondary">🖼️ Galerie<input type="file" id="galInput" accept="image/*"></label>
+    </div>
+    <div class="preview" style="margin-top:12px">
+      <canvas id="canvas" hidden></canvas>
+      <span class="empty" id="emptyMsg">Aucune photo choisie</span>
+    </div>
+
+    <label>Luminosité <span id="brightVal">0</span></label>
+    <input type="range" id="bright" min="-100" max="100" value="0">
+    <label>Contraste <span id="contrastVal">0</span></label>
+    <input type="range" id="contrast" min="-100" max="100" value="20">
+
+    <label>Texte sous la photo (optionnel)</label>
+    <input type="text" id="caption" placeholder="ex. Soirée du 13/11">
+
+    <label>Mode</label>
+    <div class="row" id="modeRow">
+      <button data-mode="nb">⚡ N&amp;B</button>
+      <button class="secondary" data-mode="gris">✨ Gris</button>
+    </div>
+    <div class="hint" id="modeHint"></div>
+
+    <details>
+      <summary>Réglages avancés</summary>
+      <label>Énergie (noirceur) <span id="energyVal"></span></label>
+      <input type="range" id="energy" min="2000" max="15000" step="250" value="8000">
+      <label>Vitesse (petit = rapide) <span id="speedVal"></span></label>
+      <input type="range" id="speed" min="10" max="60" step="1" value="30">
+    </details>
+  </div>
+
+  <!-- 3. Impression -->
+  <div class="card">
+    <button id="printBtn" disabled>Imprimer</button>
+    <div class="progress"><div id="bar"></div></div>
+    <div style="height:10px"></div>
+    <button id="feedBtn" class="secondary" disabled>Faire avancer le papier</button>
+  </div>
+</main>
+
+<script>
+/* =====================================================================
+   PROTOCOLE DE L'IMPRIMANTE X6h (le même que l'appli TinyPrint)
+   Chaque commande = 51 78 | commande | 00 | longueur (2 octets) | données | CRC8 | FF
+   ===================================================================== */
+const SERVICE   = '0000ae30-0000-1000-8000-00805f9b34fb';
+const SERVICE_ANNONCE = '0000af30-0000-1000-8000-00805f9b34fb'; // celui que l'imprimante affiche avant connexion
+const WRITE_UID = '0000ae01-0000-1000-8000-00805f9b34fb'; // on écrit ici
+const NOTIF_UID = '0000ae02-0000-1000-8000-00805f9b34fb'; // l'imprimante répond ici
+const WIDTH = 384;                 // largeur de la tête d'impression, en points
+const BLOC = 177;                  // taille maximale d'un envoi Bluetooth (comme Tiny Print)
+
+const CMD = {
+  FEED:     0xA1, // avancer le papier (2 octets : nombre de lignes)
+  LINE:     0xA2, // une ligne d'image (48 octets, 1 bit par point)
+  STATE:    0xA3, // demander l'état de l'imprimante
+  QUALITY:  0xA4, // qualité (0x31 à 0x35)
+  ENERGY:   0xAF, // énergie de chauffe (2 octets)
+  STATUS:   0xAE, // l'imprimante dit "pause" (0x10) ou "continue" (0x00)
+  SPEED:    0xBD, // vitesse
+  PRINT:    0xBE, // type d'impression (0x00 = image)
+  GRAY:     0xCF, // paquet de lignes en 16 niveaux de gris
+};
+
+/* Les deux modes d'impression. Valeurs trouvées par des essais sur une X6h-FC21
+   (voir REGLAGES.md) et dans le code de l'appli Tiny Print.
+   - nb   : chaque point est noir ou blanc ; noir profond, texte net, rendu granuleux
+   - gris : chaque point a 16 niveaux de chauffe ; dégradés lisses, plus lent */
+const MODES = {
+  nb:   { gray: false, quality: 0x35, energy: 8000, speed: 30,
+          hint: 'Noir et blanc : noir profond, texte net, rendu « ticket » granuleux.' },
+  gris: { gray: true,  quality: 0x33, energy: 6500, speed: 40,
+          hint: 'Niveaux de gris : dégradés lisses pour les photos, impression plus lente.' },
+};
+let mode = 'nb';
+const GAMMA_NB = 1.5;       // éclaircit les gris en noir et blanc (l'imprimante les fonce)
+const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gris
+const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
+const GRAY_BLOCK_DELAY = 12; // mode gris : attente (ms) entre deux envois Bluetooth
+const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
+
+// Somme de contrôle CRC8 (polynôme 0x07), calculée sur les données seulement
+function crc8(data) {
+  let c = 0;
+  for (const b of data) {
+    c ^= b;
+    for (let i = 0; i < 8; i++) c = (c & 0x80) ? ((c << 1) ^ 0x07) & 0xFF : (c << 1) & 0xFF;
+  }
+  return c;
+}
+
+// Fabrique un paquet complet prêt à envoyer
+function packet(cmd, data) {
+  const d = Uint8Array.from(data);
+  const p = new Uint8Array(8 + d.length);
+  p.set([0x51, 0x78, cmd, 0x00, d.length & 0xFF, d.length >> 8], 0);
+  p.set(d, 6);
+  p[6 + d.length] = crc8(d);
+  p[7 + d.length] = 0xFF;
+  return p;
+}
+const u16 = n => [n & 0xFF, (n >> 8) & 0xFF]; // nombre sur 2 octets, poids faible d'abord
+
+/* =====================================================================
+   CONNEXION BLUETOOTH (Web Bluetooth : marche dans Bluefy sur iPhone,
+   Chrome sur Android / ordinateur)
+   ===================================================================== */
+let device = null;                // l'imprimante choisie (on la garde pour se reconnecter seul)
+let writeChar = null;             // null = pas de liaison active en ce moment
+let paused = false;               // true quand l'imprimante dit que son tampon est plein
+let linking = false;              // true pendant une tentative de connexion
+let notifOk = false;              // true si l'imprimante peut nous demander des pauses
+let pauseCount = 0;               // nombre de pauses demandées pendant l'impression en cours
+const statusEl = document.getElementById('status');
+
+function setStatus(text, kind = '') { statusEl.textContent = text; statusEl.className = kind; }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Abandonne une étape qui ne répond pas au bout de « ms » millisecondes
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, ko) =>
+    setTimeout(() => ko(new Error('pas de réponse de l\'imprimante')), ms))]);
+}
+
+// 1) Choisir l'imprimante dans la liste (une seule fois)
+async function connect() {
+  if (!navigator.bluetooth) {
+    setStatus("Ce navigateur ne gère pas le Bluetooth. Ouvre la page dans Bluefy.", 'err');
+    return;
+  }
+  try {
+    setStatus('Recherche…');
+    const chosen = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'X6' }, { services: [SERVICE_ANNONCE] }, { services: [SERVICE] }],
+      optionalServices: [SERVICE],
+    });
+    if (device && device !== chosen) { try { device.gatt.disconnect(); } catch (_) {} }
+    device = chosen;
+    device.addEventListener('gattserverdisconnected', () => {
+      if (device !== chosen) return;
+      writeChar = null; updateButtons();
+      // Ce n'est pas grave : on se reconnectera tout seul au moment d'imprimer
+      if (!linking && !printing) setStatus('En veille — reconnexion automatique à l\'impression');
+    });
+    await ensureConnected();
+    setStatus('Connectée à ' + (device.name || 'l\'imprimante') + ' ✓', 'ok');
+  } catch (e) {
+    setStatus('Connexion impossible : ' + e.message +
+      '. Ferme Tiny Print, éteins et rallume l\'imprimante, puis réessaie.', 'err');
+  }
+  updateButtons();
+}
+
+// 2) S'assurer que la liaison est active ; sinon se reconnecter, sans redemander l'appareil.
+// Sous Windows, la liaison se coupe parfois juste après la connexion : on réessaie.
+async function ensureConnected() {
+  if (writeChar && device.gatt.connected) return;
+  linking = true;
+  let lastError = null;
+  try {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        setStatus(attempt === 1 ? 'Connexion…' : `Connexion… (essai ${attempt} sur 4)`);
+        const server = await withTimeout(device.gatt.connect(), 10000);
+        await sleep(400);
+        if (!server.connected) throw new Error('liaison coupée');
+        const service = await withTimeout(server.getPrimaryService(SERVICE), 8000);
+        const chr = await withTimeout(service.getCharacteristic(WRITE_UID), 8000);
+        // On écoute les messages de l'imprimante (pour savoir quand faire une pause)
+        try {
+          const notif = await withTimeout(service.getCharacteristic(NOTIF_UID), 8000);
+          await withTimeout(notif.startNotifications(), 8000);
+          notif.addEventListener('characteristicvaluechanged', e => {
+            const dv = e.target.value;
+            const v = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+            if (v[0] === 0x51 && v[1] === 0x78 && v[2] === CMD.STATUS) {
+              paused = (v[6] === 0x10);
+              if (paused) pauseCount++;
+            }
+          });
+          notifOk = true;
+        } catch (e) { notifOk = false; console.warn('Notifications indisponibles', e); }
+        paused = false;
+        writeChar = chr;
+        return;
+      } catch (e) {
+        lastError = e; writeChar = null;
+        try { device.gatt.disconnect(); } catch (_) {}
+        if (attempt < 4) await sleep(800 * attempt);
+      }
+    }
+    throw lastError || new Error('connexion impossible');
+  } finally {
+    linking = false;
+  }
+}
+
+// 3) Garder la liaison éveillée : toutes les 8 secondes, on demande son état à l'imprimante
+setInterval(async () => {
+  if (!writeChar || printing || linking) return;
+  try { await send(packet(CMD.STATE, [0x00])); } catch (_) {}
+}, 8000);
+
+// Envoie des octets à l'imprimante, par petits blocs.
+// delay = attente (en millisecondes) entre deux blocs.
+async function send(p, delay = 0) {
+  for (let i = 0; i < p.length; i += BLOC) {
+    // on attend si l'imprimante est débordée (30 secondes au maximum, par sécurité)
+    const t0 = Date.now();
+    while (paused && Date.now() - t0 < 30000) await sleep(20);
+    paused = false;
+    const part = p.subarray(i, i + BLOC);
+    if (writeChar.writeValueWithoutResponse) await writeChar.writeValueWithoutResponse(part);
+    else await writeChar.writeValue(part);
+    if (delay) await sleep(delay);
+  }
+}
+
+/* =====================================================================
+   PRÉPARATION DE L'IMAGE : redimensionner à 384 px, régler luminosité /
+   contraste, puis tramage (dithering) pour passer en noir et blanc pur
+   ===================================================================== */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+let sourceImg = null;
+let bits = null;       // mode noir et blanc : 1 = point noir, 0 = blanc
+let levels = null;     // mode gris : niveau de chauffe de chaque point, 0 (blanc) à 15 (noir)
+let height = 0;
+
+// Noirceur approximative de chaque niveau (0 = papier blanc, 1 = noir), pour l'aperçu seulement
+const DARKNESS = [0, 0, 0, 0, 0, 0.03, 0.1, 0.22, 0.4, 0.58, 0.7, 0.8, 0.88, 0.94, 1, 1];
+
+// Tramage d'Atkinson : transforme des gris (0 à 255) en points noirs (1) ou blancs (0).
+// Donne ce rendu « ticket » granuleux.
+function atkinson(gray, w, h) {
+  const out = new Uint8Array(w * h);
+  const spread = [[1,0],[2,0],[-1,1],[0,1],[1,1],[0,2]];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const old = gray[i];
+      const val = old < 128 ? 0 : 255;
+      out[i] = val === 0 ? 1 : 0;
+      const err = (old - val) / 8;
+      for (const [dx, dy] of spread) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < w && ny < h) gray[ny * w + nx] += err;
+      }
+    }
+  }
+  return out;
+}
+
+// Mode gris : transforme des gris (0 à 255) en niveaux de chauffe de 0 (blanc) à 15 (noir).
+// Même calcul que l'appli Tiny Print : 14 paliers, l'erreur d'arrondi est répartie
+// sur les points voisins (Floyd-Steinberg).
+function toLevels(gray, w, h) {
+  const px = new Int32Array(w * h);
+  for (let i = 0; i < px.length; i++) px[i] = Math.trunc(gray[i] * GRAY_SCALE);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const v = px[i];
+      const q = Math.trunc(v / 18) * 19;
+      const err = v - q;
+      if (x < w - 1) px[i + 1] += Math.trunc(err * 7 / 16);
+      if (y < h - 1) {
+        if (x > 0) px[i + w - 1] += Math.trunc(err * 3 / 16);
+        px[i + w] += Math.trunc(err * 5 / 16);
+        if (x < w - 1) px[i + w + 1] += Math.trunc(err / 16);
+      }
+      let step = Math.trunc(q / (256 / 14));
+      if (step === 13) step = 15;
+      out[i] = 15 - Math.max(0, Math.min(15, step));
+    }
+  }
+  return out;
+}
+
+function loadFile(file) {
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => { sourceImg = img; render(); };
+  img.src = URL.createObjectURL(file);
+}
+
+function render() {
+  if (!sourceImg) return;
+  const caption = document.getElementById('caption').value.trim();
+  const imgH = Math.round(sourceImg.height * WIDTH / sourceImg.width);
+  const textH = caption ? 50 : 0;
+  height = imgH + textH;
+  canvas.width = WIDTH; canvas.height = height;
+
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, WIDTH, height);
+  ctx.drawImage(sourceImg, 0, 0, WIDTH, imgH);
+  if (caption) {
+    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 26px -apple-system, system-ui, sans-serif';
+    ctx.fillText(caption, WIDTH / 2, imgH + textH / 2, WIDTH - 16);
+  }
+
+  const bright = +document.getElementById('bright').value;
+  const contrast = +document.getElementById('contrast').value;
+  const k = (259 * (contrast + 255)) / (255 * (259 - contrast));
+
+  const imgData = ctx.getImageData(0, 0, WIDTH, height);
+  const px = imgData.data;
+  // 1) niveaux de gris + luminosité + contraste
+  const gray = new Float32Array(WIDTH * height);
+  for (let i = 0; i < gray.length; i++) {
+    let g = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
+    g = k * (g - 128) + 128 + bright;
+    gray[i] = Math.max(0, Math.min(255, g));
+  }
+  if (MODES[mode].gray) {
+    // 2) mode gris : chaque point reçoit un niveau de chauffe de 0 (blanc) à 15 (noir)
+    bits = null;
+    levels = toLevels(gray, WIDTH, height);
+    // 3) aperçu approximatif (d'après la noirceur mesurée de chaque niveau sur un vrai ticket)
+    for (let i = 0; i < levels.length; i++) {
+      const v = Math.round(255 * (1 - DARKNESS[levels[i]]));
+      px[i*4] = px[i*4+1] = px[i*4+2] = v; px[i*4+3] = 255;
+    }
+  } else {
+    // 2) mode noir et blanc : on éclaircit les gris, puis tramage
+    levels = null;
+    for (let i = 0; i < gray.length; i++) gray[i] = 255 * Math.pow(gray[i] / 255, 1 / GAMMA_NB);
+    bits = atkinson(gray, WIDTH, height);
+    // 3) aperçu exact de ce qui sera imprimé
+    for (let i = 0; i < bits.length; i++) {
+      const v = bits[i] ? 0 : 255;
+      px[i*4] = px[i*4+1] = px[i*4+2] = v; px[i*4+3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  canvas.hidden = false;
+  document.getElementById('emptyMsg').hidden = true;
+  updateButtons();
+}
+
+// Transforme une ligne de 384 points en 48 octets.
+// Le point le plus à gauche = bit de poids faible (spécificité de ces imprimantes).
+function lineBytes(bits, y) {
+  const out = new Uint8Array(WIDTH / 8);
+  for (let x = 0; x < WIDTH; x++) {
+    if (bits[y * WIDTH + x]) out[x >> 3] |= 1 << (x & 7);
+  }
+  return out;
+}
+
+/* =====================================================================
+   MODE GRIS : l'imprimante attend des paquets « CF » compressés au format LZO
+   ===================================================================== */
+
+// Emballe des données au format LZO sans chercher à les réduire : un seul bloc
+// de données « en clair », puis le marqueur de fin 11 00 00. C'est du LZO valide.
+function lzoStore(d) {
+  const n = d.length;
+  let head;
+  if (n <= 238) head = [n + 17];
+  else {
+    let zeros = Math.floor((n - 18) / 255), last = (n - 18) % 255;
+    if (last === 0) { zeros--; last = 255; }
+    head = [0, ...new Array(zeros).fill(0), last];
+  }
+  const out = new Uint8Array(head.length + n + 3);
+  out.set(head, 0);
+  out.set(d, head.length);
+  out.set([0x11, 0, 0], head.length + n);
+  return out;
+}
+
+// Paquet CF = taille d'origine | taille compressée | données compressées
+function grayPacket(d) {
+  const comp = lzoStore(d);
+  const body = new Uint8Array(4 + comp.length);
+  body.set([...u16(d.length), ...u16(comp.length)], 0);
+  body.set(comp, 4);
+  return packet(CMD.GRAY, body);
+}
+
+// Liste des paquets à envoyer pour une impression en noir et blanc
+function packetsBW(bits, h, energy, speed, quality) {
+  const list = [
+    packet(CMD.QUALITY, [quality]),
+    packet(CMD.ENERGY, u16(energy)),
+    packet(CMD.PRINT, [0x00]),                       // 0x00 = image
+    packet(CMD.SPEED, [speed]),
+    packet(CMD.LINE, new Uint8Array(WIDTH / 8)),     // 1re ligne blanche (évite des défauts)
+  ];
+  for (let y = 0; y < h; y++) list.push(packet(CMD.LINE, lineBytes(bits, y)));
+  list.push(packet(CMD.SPEED, [0x19]), packet(CMD.FEED, u16(0x30)),
+            packet(CMD.FEED, u16(0x30)), packet(CMD.SPEED, [0x19]));
+  return list;
+}
+
+// Liste des paquets à envoyer pour une impression en niveaux de gris
+// (même enchaînement que l'appli Tiny Print)
+function packetsGray(levels, h, energy, speed, quality) {
+  const rowBytes = WIDTH / 2;                        // 2 points par octet
+  const raw = new Uint8Array((h + 16) * rowBytes);   // 16 lignes blanches au début
+  let o = 16 * rowBytes;
+  for (let i = 0; i < h * WIDTH; i += 2) raw[o++] = levels[i] | (levels[i + 1] << 4);
+
+  const list = [
+    packet(CMD.QUALITY, [quality]),
+    packet(CMD.ENERGY, u16(energy)),
+    packet(CMD.PRINT, [0x00, 0x01]),                 // type « niveaux de gris »
+    packet(CMD.SPEED, [speed]),
+  ];
+  const size = GRAY_CHUNK_LINES * rowBytes;
+  for (let i = 0; i < raw.length; i += size) {
+    list.push(grayPacket(raw.subarray(i, i + size)));
+    list.push(packet(CMD.SPEED, [speed]));
+  }
+  list.push(packet(CMD.SPEED, [0x0F]), packet(CMD.FEED, u16(0x30)),
+            packet(CMD.FEED, u16(0x30)), packet(CMD.STATE, [0x00]));
+  return list;
+}
+
+/* =====================================================================
+   IMPRESSION
+   ===================================================================== */
+let printing = false;
+
+async function print() {
+  if (!device || !(bits || levels)) return;
+  printing = true; updateButtons();
+  const bar = document.getElementById('bar');
+  try {
+    await ensureConnected();
+    setStatus('Impression…');
+    const energy = +document.getElementById('energy').value;
+    const speed  = +document.getElementById('speed').value;
+    const m = MODES[mode];
+    const list = m.gray ? packetsGray(levels, height, energy, speed, m.quality)
+                        : packetsBW(bits, height, energy, speed, m.quality);
+    const total = list.reduce((s, p) => s + p.length, 0);
+    let sent = 0;
+    pauseCount = 0;
+    for (let n = 0; n < list.length; n++) {
+      // En gris, les paquets sont gros : un seul morceau perdu fait disparaître
+      // 20 lignes. On envoie donc plus lentement, et on souffle après chaque paquet.
+      await send(list[n], m.gray ? GRAY_BLOCK_DELAY : 0);
+      if (m.gray && list[n][2] === CMD.GRAY) await sleep(GRAY_PACKET_PAUSE);
+      sent += list[n].length;
+      bar.style.width = (100 * sent / total) + '%';
+      if (!m.gray && n % 8 === 0) await sleep(4);
+    }
+    bar.style.width = '100%';
+    setStatus(`Imprimé ✓ (pauses demandées par l'imprimante : ${notifOk ? pauseCount : 'inconnu'})`, 'ok');
+  } catch (e) {
+    setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
+  }
+  printing = false; updateButtons();
+  setTimeout(() => (bar.style.width = '0'), 1500);
+}
+
+async function feed() {
+  try {
+    await ensureConnected();
+    await send(packet(CMD.FEED, u16(0x60)));
+    setStatus('Connectée à ' + (device.name || 'l\'imprimante') + ' ✓', 'ok');
+  } catch (e) { setStatus('Erreur : ' + e.message, 'err'); }
+  updateButtons();
+}
+
+/* =====================================================================
+   BRANCHEMENT DES BOUTONS
+   ===================================================================== */
+function updateButtons() {
+  // On garde les boutons actifs même quand la liaison dort : elle se rétablit toute seule
+  document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing;
+  document.getElementById('feedBtn').disabled  = !device || printing;
+  document.getElementById('connectBtn').textContent = device ? 'Changer d\'imprimante' : 'Connecter l\'imprimante';
+}
+
+document.getElementById('connectBtn').onclick = connect;
+document.getElementById('printBtn').onclick = print;
+document.getElementById('feedBtn').onclick = feed;
+document.getElementById('camInput').onchange = e => loadFile(e.target.files[0]);
+document.getElementById('galInput').onchange = e => loadFile(e.target.files[0]);
+
+for (const id of ['bright', 'contrast', 'energy', 'speed']) {
+  const el = document.getElementById(id), out = document.getElementById(id + 'Val');
+  const show = () => { if (out) out.textContent = el.value; };
+  show();
+  el.oninput = () => { show(); if (id === 'bright' || id === 'contrast') render(); };
+}
+document.getElementById('caption').oninput = render;
+
+/* Choix du mode : chaque mode a sa propre énergie et sa propre vitesse (voir MODES en haut) */
+function setMode(m) {
+  mode = m;
+  for (const id of ['energy', 'speed']) {
+    const el = document.getElementById(id);
+    el.value = MODES[m][id];
+    document.getElementById(id + 'Val').textContent = el.value;
+  }
+  document.getElementById('modeHint').textContent = MODES[m].hint;
+  for (const b of document.querySelectorAll('#modeRow button'))
+    b.className = b.dataset.mode === m ? '' : 'secondary';
+  render();   // l'aperçu dépend du mode
+}
+for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => setMode(b.dataset.mode);
+setMode('nb');
+</script>
+</body>
+</html>
