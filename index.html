@@ -127,6 +127,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 const GRAY_BLOCK_DELAY = 12; // mode gris : attente (ms) entre deux envois Bluetooth
 const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
 const BW_LINE_DELAY = 5;     // noir et blanc : attente (ms) après chaque ligne (l'iPhone sature sinon)
+const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
 
 // Somme de contrôle CRC8 (polynôme 0x07), calculée sur les données seulement
 function crc8(data) {
@@ -160,6 +161,28 @@ let paused = false;               // true quand l'imprimante dit que son tampon 
 let linking = false;              // true pendant une tentative de connexion
 let notifOk = false;              // true si l'imprimante peut nous demander des pauses
 let pauseCount = 0;               // nombre de pauses demandées pendant l'impression en cours
+let replies = 0;                  // nombre de messages reçus de l'imprimante
+let printerState = null;          // dernier état envoyé par l'imprimante (réponse à A3)
+
+// Traduit l'état de l'imprimante en phrase (d'après l'appli Tiny Print).
+// Renvoie '' si tout va bien.
+function stateProblem(s) {
+  if (s === null) return '';
+  const p = [];
+  if (s & 0x01) p.push('plus de papier');
+  if (s & 0x02) p.push('capot ouvert');
+  if (s & 0x04) p.push('tête trop chaude, attends un peu');
+  if (s & 0x08) p.push('batterie faible, recharge-la');
+  return p.join(', ');
+}
+
+// Demande son état à l'imprimante et attend la réponse (2 secondes au plus)
+async function askState() {
+  printerState = null;
+  try { await send(packet(CMD.STATE, [0x00])); } catch (_) { return null; }
+  for (let i = 0; i < 20 && printerState === null; i++) await sleep(100);
+  return printerState;
+}
 const statusEl = document.getElementById('status');
 
 function setStatus(text, kind = '') { statusEl.textContent = text; statusEl.className = kind; }
@@ -222,10 +245,12 @@ async function ensureConnected() {
           notif.addEventListener('characteristicvaluechanged', e => {
             const dv = e.target.value;
             const v = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+            replies++;
             if (v[0] === 0x51 && v[1] === 0x78 && v[2] === CMD.STATUS) {
               paused = (v[6] === 0x10);
               if (paused) pauseCount++;
             }
+            if (v[0] === 0x51 && v[1] === 0x78 && v[2] === CMD.STATE) printerState = v[6];
           });
           notifOk = true;
         } catch (e) { notifOk = false; console.warn('Notifications indisponibles', e); }
@@ -481,6 +506,8 @@ async function print() {
   const bar = document.getElementById('bar');
   try {
     await ensureConnected();
+    // Avant d'imprimer, on demande son état à l'imprimante (pour le rapport de fin)
+    const before = await askState();
     setStatus('Impression…');
     const energy = +document.getElementById('energy').value;
     const speed  = +document.getElementById('speed').value;
@@ -503,6 +530,9 @@ async function print() {
         setStatus(`Liaison coupée, reconnexion… (${reconnects} sur 3)`);
         writeChar = null;
         await ensureConnected();
+        // Après une coupure, l'imprimante a oublié les réglages : on les renvoie
+        // (qualité, énergie, type d'image, vitesse) avant de continuer.
+        for (let k = 0; k < HEADER_PACKETS; k++) await send(list[k], 5);
         setStatus('Impression…');
         n--;
         continue;
@@ -512,7 +542,16 @@ async function print() {
       bar.style.width = (100 * sent / total) + '%';
     }
     bar.style.width = '100%';
-    setStatus(`Imprimé ✓ (pauses demandées par l'imprimante : ${notifOk ? pauseCount : 'inconnu'})`, 'ok');
+    // Petit rapport pour comprendre ce qui s'est passé si rien ne sort
+    await sleep(500);
+    const after = await askState();
+    const info = `pauses : ${pauseCount}, reconnexions : ${reconnects}, ` +
+      (notifOk ? `messages reçus : ${replies}` : 'l\'imprimante ne répond pas') +
+      (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
+      (after === null ? '' : `, après : ${after.toString(16).padStart(2, '0')}`);
+    const problem = stateProblem(after ?? before);
+    if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
+    else setStatus(`Envoyé ✓ (${info})`, 'ok');
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
   }
