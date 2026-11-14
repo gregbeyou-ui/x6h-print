@@ -17,7 +17,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 | 2. Décompiler Tiny Print | ✅ Faite |
 | 3. Mettre à jour `index.html` | ✅ Faite |
 | 4. Mise en ligne sur GitHub Pages | ✅ Faite — **l'iPhone imprime une photo en entier (N&B, version v5)** |
-| 5. Relais pour les invités (PC, puis ESP32) | ⏳ Pas commencée |
+| 5. Photos des invités | 🟡 Bouton « 📲 Amis » + QR code (v13), testé entre deux onglets du PC, pas encore avec de vrais téléphones. Le relais PC / ESP32 n'est plus indispensable. |
 
 ### Ce qui marche
 
@@ -55,8 +55,15 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 ## Prochaine chose à faire
 
-1. Dans Bluefy (v12), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
-2. Ensuite : étape 5, le relais pour les invités.
+1. Dans Bluefy (v13), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
+2. Essayer le bouton « 📲 Amis » avec un deuxième téléphone : scanner le QR code, envoyer une photo, l'imprimer. Essayer aussi avec l'ami en 4G/5G (pas sur le même Wi-Fi).
+
+### Photos des invités (v13) : comment ça marche
+
+- Le bouton **📲 Amis** affiche un QR code vers `envoyer.html#<identifiant>`. L'identifiant est gardé dans le téléphone : le QR code reste le même d'une fois sur l'autre.
+- Les deux pages se relient directement (WebRTC) grâce à la bibliothèque **PeerJS** et à son serveur gratuit de mise en relation. Les photos ne sont stockées sur aucun serveur.
+- La photo est réduite à 768 points de large (JPEG) chez l'ami avant l'envoi.
+- Limites : la page de l'imprimante doit rester **ouverte à l'écran** (l'iPhone coupe tout en arrière-plan), les deux téléphones doivent avoir internet, et le service PeerJS gratuit peut être indisponible de temps en temps.
 
 ---
 
@@ -88,6 +95,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 | Fichier | Rôle | Sur GitHub ? |
 |---|---|---|
 | `index.html` | La page web | Oui |
+| `envoyer.html` | La page des amis (ouverte par le QR code) | Oui |
 | `imprimer_test.py` | Script Python d'essais (`python imprimer_test.py --help`) | Oui |
 | `REGLAGES.md` | Résultats de tous les essais | Oui |
 | `README.md` | Mode d'emploi de la page | Oui |

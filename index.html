@@ -34,6 +34,18 @@
   details summary { font-size:14px; color:var(--muted); cursor:pointer; margin-top:10px; }
   .progress { height:6px; background:#e8e6e0; border-radius:3px; overflow:hidden; margin-top:10px; }
   .progress > div { height:100%; width:0; background:var(--accent); transition:width .1s; }
+  .row3 { gap:8px; }
+  .row3 .filebtn, .row3 button { padding:14px 4px; font-size:15px; margin:0; display:flex; align-items:center; justify-content:center; }
+  #guestPanel { margin-top:12px; padding:12px; border-radius:12px; background:#f8f7f3; }
+  #qr { display:flex; justify-content:center; background:#fff; border-radius:12px; padding:10px; }
+  #qr svg { width:220px; height:220px; }
+  #guestStatus { text-align:center; }
+  .thumbs { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:12px; }
+  .thumb { position:relative; border-radius:10px; overflow:hidden; background:#fff; border:2px solid transparent; cursor:pointer; }
+  .thumb.selected { border-color:var(--accent); }
+  .thumb img { width:100%; height:90px; object-fit:cover; display:block; }
+  .thumb span { display:block; font-size:12px; padding:3px 5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .thumb b { position:absolute; top:4px; right:4px; background:var(--ok); color:#fff; font-size:11px; padding:2px 6px; border-radius:8px; }
 </style>
 </head>
 <body>
@@ -52,9 +64,19 @@
 
   <!-- 2. Photo -->
   <div class="card">
-    <div class="row">
+    <div class="row row3">
       <label class="filebtn">📷 Photo<input type="file" id="camInput" accept="image/*" capture="environment"></label>
       <label class="filebtn secondary">🖼️ Galerie<input type="file" id="galInput" accept="image/*"></label>
+      <button class="secondary" id="guestBtn">📲 Amis</button>
+    </div>
+    <!-- Photos des amis : ils scannent le QR code et envoient leurs photos ici -->
+    <div id="guestPanel" hidden>
+      <div id="qr"></div>
+      <div class="hint" id="guestStatus">Préparation du QR code…</div>
+      <div style="height:8px"></div>
+      <button class="secondary" id="shareBtn" hidden>Envoyer le lien par message</button>
+      <div class="hint">Les amis scannent le QR code avec l'appareil photo de leur téléphone, puis envoient leurs photos. Garde cette page ouverte à l'écran pendant ce temps. Touche une photo reçue pour la préparer.</div>
+      <div class="thumbs" id="guestList"></div>
     </div>
     <div class="preview" style="margin-top:12px">
       <canvas id="canvas" hidden></canvas>
@@ -157,7 +179,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v12';
+const VERSION = '14/11 – v13';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -684,6 +706,7 @@ async function print() {
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
+    if (currentGuest) { currentGuest.printed = true; renderGuests(); }
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
   }
@@ -701,6 +724,135 @@ async function feed() {
 }
 
 /* =====================================================================
+   PHOTOS DES AMIS : un QR code mène à envoyer.html, qui se relie directement
+   à ce téléphone (WebRTC, via la bibliothèque PeerJS et son serveur de mise
+   en relation gratuit). Les photos arrivent ici sans passer par un serveur à nous.
+   ===================================================================== */
+const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+const QRCODE_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+let hostPeer = null;       // notre « boîte aux lettres » pour les photos des amis
+let guestPhotos = [];      // photos reçues : { blob, url, from, printed }
+let currentGuest = null;   // photo d'ami actuellement préparée pour l'impression
+let guestLinks = 0;        // nombre d'amis connectés en ce moment
+const guestStatus = document.getElementById('guestStatus');
+
+function loadScript(src) {
+  return new Promise((ok, ko) => {
+    if (document.querySelector(`script[src="${src}"]`)) return ok();
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => ko(new Error('pas de connexion internet'));
+    document.head.appendChild(s);
+  });
+}
+
+// Identifiant gardé d'une fois sur l'autre : le QR code reste le même si on recharge la page
+function hostId(renew = false) {
+  let id = null;
+  try { id = renew ? null : localStorage.getItem('x6h-hote'); } catch (_) {}
+  if (!id) {
+    const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+    id = 'x6h-' + Array.from(crypto.getRandomValues(new Uint8Array(10)), b => abc[b % abc.length]).join('');
+    try { localStorage.setItem('x6h-hote', id); } catch (_) {}
+  }
+  return id;
+}
+
+function guestLink(id) { return new URL('envoyer.html', location.href).href + '#' + id; }
+
+function showGuestState() {
+  if (!hostPeer || !hostPeer.open) return;
+  guestStatus.className = 'hint';
+  guestStatus.textContent = guestLinks
+    ? `Prêt ✓ ${guestLinks} ami${guestLinks > 1 ? 's' : ''} connecté${guestLinks > 1 ? 's' : ''}`
+    : 'Prêt ✓ En attente des photos…';
+}
+
+async function startGuests(renew = false) {
+  try {
+    guestStatus.textContent = 'Préparation du QR code…';
+    await Promise.all([loadScript(PEERJS_URL), loadScript(QRCODE_URL)]);
+  } catch (e) { guestStatus.textContent = 'Impossible de préparer le QR code : ' + e.message; return; }
+  if (hostPeer && !hostPeer.destroyed) hostPeer.destroy();
+  const id = hostId(renew);
+  const peer = new Peer(id);
+  hostPeer = peer;
+
+  peer.on('open', () => {
+    const qr = qrcode(0, 'M');
+    qr.addData(guestLink(id)); qr.make();
+    document.getElementById('qr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    document.getElementById('shareBtn').hidden = false;
+    showGuestState();
+  });
+  peer.on('connection', conn => {
+    conn.on('open', () => { guestLinks++; showGuestState(); });
+    conn.on('close', () => { guestLinks = Math.max(0, guestLinks - 1); showGuestState(); });
+    conn.on('data', d => {
+      if (!d || d.type !== 'photo' || !d.image) return;
+      addGuestPhoto(new Blob([d.image], { type: 'image/jpeg' }), String(d.from || '').slice(0, 30));
+      try { conn.send({ type: 'recu' }); } catch (_) {}
+    });
+  });
+  peer.on('disconnected', () => { if (hostPeer === peer && !peer.destroyed) setTimeout(() => { try { peer.reconnect(); } catch (_) {} }, 1500); });
+  peer.on('error', e => {
+    if (hostPeer !== peer) return;
+    if (e.type === 'unavailable-id') return startGuests(true);   // identifiant déjà pris : on en change
+    if (e.type === 'peer-unavailable') return;                   // un ami parti : pas grave
+    guestStatus.className = 'hint';
+    guestStatus.textContent = 'Connexion internet perdue (' + e.type + '), nouvel essai dans 5 secondes…';
+    setTimeout(() => { if (hostPeer === peer && (peer.destroyed || !peer.open)) startGuests(); }, 5000);
+  });
+}
+
+function addGuestPhoto(blob, from) {
+  const g = { blob, url: URL.createObjectURL(blob), from, printed: false };
+  guestPhotos.unshift(g);                         // la plus récente en premier
+  if (!sourceImg) chooseGuest(g);                 // aucune photo choisie : on prépare celle-ci
+  renderGuests();
+  if (navigator.vibrate) navigator.vibrate(100);
+}
+
+function chooseGuest(g) {
+  currentGuest = g;
+  loadFile(g.blob);
+  renderGuests();
+}
+
+function renderGuests() {
+  const list = document.getElementById('guestList');
+  list.innerHTML = '';
+  for (const g of guestPhotos) {
+    const d = document.createElement('div');
+    d.className = 'thumb' + (g === currentGuest ? ' selected' : '');
+    const im = document.createElement('img'); im.src = g.url; im.alt = '';
+    const name = document.createElement('span'); name.textContent = g.from || 'Anonyme';
+    d.append(im, name);
+    if (g.printed) { const b = document.createElement('b'); b.textContent = '✓ imprimée'; d.append(b); }
+    d.onclick = () => { chooseGuest(g); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    list.append(d);
+  }
+}
+
+document.getElementById('guestBtn').onclick = () => {
+  const panel = document.getElementById('guestPanel');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden && (!hostPeer || hostPeer.destroyed)) startGuests();
+};
+document.getElementById('shareBtn').onclick = async () => {
+  const url = guestLink(hostId());
+  try {
+    if (navigator.share) await navigator.share({ title: 'Envoie-moi tes photos', url });
+    else { await navigator.clipboard.writeText(url); guestStatus.textContent = 'Lien copié ✓'; }
+  } catch (_) {}
+};
+// En revenant sur la page, on vérifie que la « boîte aux lettres » est toujours ouverte
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !hostPeer) return;
+  if (hostPeer.destroyed) startGuests();
+  else if (hostPeer.disconnected) { try { hostPeer.reconnect(); } catch (_) {} }
+});
+
+/* =====================================================================
    BRANCHEMENT DES BOUTONS
    ===================================================================== */
 function updateButtons() {
@@ -713,8 +865,8 @@ function updateButtons() {
 document.getElementById('connectBtn').onclick = connect;
 document.getElementById('printBtn').onclick = print;
 document.getElementById('feedBtn').onclick = feed;
-document.getElementById('camInput').onchange = e => loadFile(e.target.files[0]);
-document.getElementById('galInput').onchange = e => loadFile(e.target.files[0]);
+document.getElementById('camInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
+document.getElementById('galInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
 
 for (const id of ['bright', 'contrast', 'energy', 'speed']) {
   const el = document.getElementById(id), out = document.getElementById(id + 'Val');

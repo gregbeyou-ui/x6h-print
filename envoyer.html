@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Envoyer une photo</title>
+<style>
+  :root { --bg:#f4f1ea; --card:#fff; --ink:#1d1d1f; --muted:#6e6e73; --accent:#1d1d1f; --ok:#2e7d32; --err:#c62828; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
+  body { margin:0; font-family:-apple-system, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:480px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:22px; margin:4px 0 6px; }
+  p.intro { color:var(--muted); font-size:15px; margin:0 0 16px; line-height:1.4; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  button, .filebtn { display:block; width:100%; border:0; border-radius:12px; padding:15px; font-size:17px; font-weight:600;
+           background:var(--accent); color:#fff; text-align:center; cursor:pointer; }
+  .filebtn.secondary { background:#e8e6e0; color:var(--ink); }
+  button:disabled { opacity:.35; }
+  input[type=file] { display:none; }
+  label.field { display:block; font-size:14px; margin:0 0 4px; }
+  input[type=text] { width:100%; font-size:16px; padding:10px; border-radius:10px; border:1px solid #ccc; background:#fff; }
+  .preview { margin:12px 0; display:flex; justify-content:center; align-items:center; min-height:120px;
+             border:1px dashed #ccc; border-radius:12px; overflow:hidden; background:#fff; }
+  .preview img { max-width:100%; max-height:360px; display:block; }
+  .empty { color:var(--muted); font-size:14px; }
+  #status { font-size:14px; color:var(--muted); margin-top:10px; text-align:center; line-height:1.4; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--err); }
+  .count { text-align:center; color:var(--muted); font-size:13px; margin-top:6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>📲 Envoyer une photo</h1>
+  <p class="intro">Ta photo part vers le téléphone relié à l'imprimante. Elle sera imprimée sur un petit ticket.</p>
+
+  <div class="card">
+    <label class="field" for="from">Ton prénom (optionnel)</label>
+    <input type="text" id="from" maxlength="30" placeholder="ex. Camille">
+  </div>
+
+  <div class="card">
+    <label class="filebtn secondary">🖼️ Choisir une photo<input type="file" id="fileInput" accept="image/*"></label>
+    <div class="preview"><img id="previewImg" hidden alt=""><span class="empty" id="emptyMsg">Aucune photo choisie</span></div>
+    <button id="sendBtn" disabled>Envoyer</button>
+    <div id="status">Connexion au téléphone de l'imprimante…</div>
+    <div class="count" id="count"></div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* Page des invités : on se relie directement (WebRTC, via PeerJS) au téléphone
+   qui pilote l'imprimante. Son identifiant est dans l'adresse, après le « # ». */
+const hostId = decodeURIComponent(location.hash.slice(1));
+const statusEl = document.getElementById('status');
+const sendBtn = document.getElementById('sendBtn');
+const fromEl = document.getElementById('from');
+let conn = null, ready = false, photo = null, sentCount = 0, peer = null;
+
+function setStatus(t, kind = '') { statusEl.textContent = t; statusEl.className = kind; }
+function updateBtn() { sendBtn.disabled = !(ready && photo); }
+
+try { fromEl.value = localStorage.getItem('x6h-prenom') || ''; } catch (_) {}
+fromEl.oninput = () => { try { localStorage.setItem('x6h-prenom', fromEl.value); } catch (_) {} };
+
+function connect() {
+  if (!hostId) { setStatus('Lien incomplet : scanne à nouveau le QR code.', 'err'); return; }
+  if (typeof Peer === 'undefined') { setStatus('Pas de connexion internet.', 'err'); return; }
+  setStatus('Connexion au téléphone de l\'imprimante…');
+  if (!peer || peer.destroyed) {
+    peer = new Peer();
+    peer.on('error', e => {
+      ready = false; updateBtn();
+      if (e.type === 'peer-unavailable')
+        setStatus('Le téléphone de l\'imprimante est introuvable. Sa page doit rester ouverte à l\'écran. Réessaie dans un instant.', 'err');
+      else setStatus('Problème de connexion (' + e.type + '). Réessaie dans un instant.', 'err');
+      setTimeout(retry, 4000);
+    });
+    peer.on('open', openConn);
+  } else openConn();
+}
+
+function openConn() {
+  conn = peer.connect(hostId, { reliable: true, serialization: 'binary' });
+  conn.on('open', () => { ready = true; updateBtn(); setStatus('Connecté ✓ Choisis une photo puis touche Envoyer.', 'ok'); });
+  conn.on('data', d => {
+    if (d && d.type === 'recu') {
+      sentCount++;
+      setStatus('Photo envoyée ✓ Tu peux en envoyer une autre.', 'ok');
+      document.getElementById('count').textContent = sentCount + ' photo' + (sentCount > 1 ? 's' : '') + ' envoyée' + (sentCount > 1 ? 's' : '');
+      sendBtn.textContent = 'Envoyer';
+      updateBtn();
+    }
+  });
+  conn.on('close', () => { ready = false; updateBtn(); setStatus('Connexion perdue, on se reconnecte…'); setTimeout(retry, 2000); });
+}
+
+let retrying = false;
+function retry() {
+  if (retrying || ready) return;
+  retrying = true;
+  setTimeout(() => { retrying = false; }, 3000);
+  if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (_) {} }
+  if (peer && peer.open) openConn(); else connect();
+}
+// En revenant sur la page (après être allé chercher une photo), on vérifie la liaison
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready) retry(); });
+
+// Réduit la photo (l'imprimante ne fait que 384 points de large) : envoi plus rapide
+function shrink(file) {
+  return new Promise((ok, ko) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = Math.min(768, img.width), h = Math.round(img.height * w / img.width);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      c.toBlob(b => b ? ok(b) : ko(new Error('conversion impossible')), 'image/jpeg', 0.85);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => ko(new Error('photo illisible'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+document.getElementById('fileInput').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    photo = await shrink(f);
+    const im = document.getElementById('previewImg');
+    im.src = URL.createObjectURL(photo); im.hidden = false;
+    document.getElementById('emptyMsg').hidden = true;
+  } catch (err) { setStatus('Cette photo ne peut pas être lue : ' + err.message, 'err'); photo = null; }
+  e.target.value = '';
+  updateBtn();
+};
+
+sendBtn.onclick = async () => {
+  if (!ready || !photo) return;
+  sendBtn.disabled = true; sendBtn.textContent = 'Envoi…';
+  setStatus('Envoi en cours…');
+  // Sans réponse au bout de 30 secondes, on laisse réessayer
+  setTimeout(() => {
+    if (sendBtn.textContent !== 'Envoi…') return;
+    sendBtn.textContent = 'Envoyer'; updateBtn();
+    setStatus('Pas de réponse du téléphone de l\'imprimante. Réessaie.', 'err');
+  }, 30000);
+  try {
+    conn.send({ type: 'photo', from: fromEl.value.trim().slice(0, 30), image: await photo.arrayBuffer() });
+  } catch (err) {
+    setStatus('Envoi impossible : ' + err.message, 'err');
+    sendBtn.textContent = 'Envoyer'; updateBtn();
+  }
+};
+
+connect();
+</script>
+</body>
+</html>
