@@ -22,7 +22,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 ### Ce qui marche
 
 - **Depuis l'iPhone avec Bluefy (version v5)** : une photo en N&B sort en entier. 🎉
-- **Depuis l'iPhone en mode Gris (version v9)** : la photo sort, mais lentement et avec une ligne blanche tous les 2 à 3 mm (voir plus bas).
+- **Depuis l'iPhone en mode Gris** : la photo sort en entier et sans à-coups avec le rythme **Normal** (vitesse imprimante 100 ou 60 essayées). La v12 met par défaut, en Gris : rythme Normal, morceaux de 100 octets, vitesse imprimante 75 (65 sur le curseur).
 - **Depuis le PC avec Python** : noir et blanc et niveaux de gris impriment correctement.
 - **Depuis Chrome sur le PC** : le noir et blanc imprime une photo complète et propre.
 
@@ -33,7 +33,12 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Bluefy et GitHub gardent l'ancienne page en mémoire quelques minutes : le numéro de version est affiché tout en bas de la page.
 - **Mode Gris, rien ne sortait (corrigé en v9)** : un paquet gris (environ 3 850 octets) est découpé en morceaux. La page passait à Bluefy une « fenêtre » sur le gros paquet (`subarray`) ; Bluefy envoyait alors le début du paquet entier au lieu du morceau. Il faut une vraie copie (`slice`). Chrome n'avait pas ce problème.
 - L'imprimante **n'accepte pas** les envois avec accusé de réception (essayé en v7).
-- **Lignes blanches en Gris** : un paquet = 20 lignes = 2,5 mm. Si le paquet suivant arrive trop tard, l'imprimante s'arrête et laisse une ligne blanche. La v10 raccourcit les attentes entre paquets selon le « Rythme d'envoi » ; le message de fin affiche le rythme et la durée.
+- **Lignes blanches en Gris** : un paquet = 20 lignes = 2,5 mm. Si le paquet suivant arrive trop tard, l'imprimante s'arrête et laisse une ligne blanche. Essais sur iPhone :
+  - rythme Lent : saccadé, même en vitesse imprimante 100 (36 s) ;
+  - rythme Rapide + morceaux de 177 octets : 1 cm puis arrêt (morceaux perdus, imprimante bloquée) ;
+  - rythme Normal + morceaux de 100 octets, vitesse imprimante 100 : fluide ;
+  - même chose en vitesse imprimante 60 : fluide, mais plus contrasté (les gris clairs pâlissent).
+- **Curseur de vitesse (v12)** : de 0 (le plus lent) à 100 (le plus rapide). Valeur envoyée à l'imprimante = 12 + 1,8 × (100 − curseur) : 100 → 12, 90 → 30 (N&B), 65 → 75 (Gris), 0 → 192.
 
 ### Android
 
@@ -43,15 +48,15 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 ### Pas encore vérifié
 
 - **Mode Gris depuis Chrome** : des bandes de 20 lignes manquaient au premier essai ; l'envoi a été ralenti et regroupé depuis, pas encore réimprimé.
-- Quel rythme et quelle taille de morceaux font disparaître les lignes blanches en Gris sur iPhone.
+- Le rendu en Gris avec les réglages par défaut de la v12 (vitesse imprimante 75), jamais imprimé tel quel.
+- Si le rythme Normal suffit aussi en N&B sur iPhone (gagnerait du temps).
 
 ---
 
 ## Prochaine chose à faire
 
-1. Dans Bluefy (v10), imprimer en Gris avec « Rythme : Normal » et « Morceaux : 177 octets », puis avec « Rythme : Rapide ». Noter pour chacun : photo complète ou non, lignes blanches, durée affichée.
-2. Choisir les réglages par défaut d'après ces essais.
-3. Ensuite : étape 5, le relais pour les invités.
+1. Dans Bluefy (v12), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
+2. Ensuite : étape 5, le relais pour les invités.
 
 ---
 
@@ -60,7 +65,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 | | Noir et blanc (N&B) | Gris (16 niveaux) |
 |---|---|---|
 | Énergie | **8000** (5000 abîme le noir) | **6500** (4715 donne un noir trop pâle) |
-| Vitesse | 30 (15 = plus rapide mais noir un peu moins dense) | 40 |
+| Vitesse (valeur imprimante, petit = rapide) | 30 (15 = plus rapide mais noir un peu moins dense) | **75** (40 = trop rapide pour l'envoi depuis l'iPhone : à-coups) |
 | Qualité (commande `A4`) | `35` | `33` |
 | Traitement de l'image | correction des gris 1.5 + tramage Atkinson | calcul de Tiny Print (14 paliers, Floyd-Steinberg, coefficient 0,9) |
 
