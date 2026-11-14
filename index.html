@@ -141,7 +141,7 @@ const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gri
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
 const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '13/11 – v6';
+const VERSION = '14/11 – v7';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -182,6 +182,7 @@ let notifOk = false;              // true si l'imprimante peut nous demander des
 let pauseCount = 0;               // nombre de pauses demandées pendant l'impression en cours
 let replies = 0;                  // nombre de messages reçus de l'imprimante
 let printerState = null;          // dernier état envoyé par l'imprimante (réponse à A3)
+let ackOk = false;                // true si l'imprimante accepte les envois « avec accusé de réception »
 
 // Traduit l'état de l'imprimante en phrase (d'après l'appli Tiny Print).
 // Renvoie '' si tout va bien.
@@ -325,6 +326,7 @@ async function ensureConnected() {
           notifOk = true;
         } catch (e) { notifOk = false; console.warn('Notifications indisponibles', e); }
         paused = false;
+        ackOk = !!(chr.properties && chr.properties.write);
         writeChar = chr;
         return;
       } catch (e) {
@@ -347,7 +349,12 @@ setInterval(async () => {
 
 // Envoie des octets à l'imprimante, par petits blocs.
 // delay = attente (en millisecondes) entre deux blocs.
-async function send(p, delay = 0) {
+// safe = true : chaque bloc attend l'accusé de réception de l'imprimante, rien ne peut
+// se perdre en route (plus lent). Indispensable en mode gris : un paquet CF fait
+// environ 3850 octets, soit 22 blocs, et s'il en manque un seul, l'imprimante jette
+// tout le paquet et peut même rester bloquée (rien ne sort).
+async function send(p, delay = 0, safe = false) {
+  const withAck = safe && ackOk;
   for (let i = 0; i < p.length; i += BLOC) {
     // on attend si l'imprimante est débordée (30 secondes au maximum, par sécurité)
     const t0 = Date.now();
@@ -355,7 +362,10 @@ async function send(p, delay = 0) {
     paused = false;
     if (!writeChar) throw new Error('liaison coupée');
     const part = p.subarray(i, i + BLOC);
-    if (writeChar.writeValueWithoutResponse) await writeChar.writeValueWithoutResponse(part);
+    if (withAck) {
+      if (writeChar.writeValueWithResponse) await writeChar.writeValueWithResponse(part);
+      else await writeChar.writeValue(part);
+    } else if (writeChar.writeValueWithoutResponse) await writeChar.writeValueWithoutResponse(part);
     else await writeChar.writeValue(part);
     if (delay) await sleep(delay);
   }
@@ -600,7 +610,10 @@ async function print() {
       group.push(p); groupLen += p.length;
     }
     flush();
-    const delay = SEND_DELAYS[document.getElementById('sendSpeed').value] || 20;
+    // En gris : envoi avec accusé de réception (si l'imprimante l'accepte). L'accusé
+    // règle déjà le rythme, on n'ajoute qu'une toute petite attente.
+    const safe = m.gray && ackOk;
+    const delay = safe ? 2 : (SEND_DELAYS[document.getElementById('sendSpeed').value] || 20);
 
     const total = chunks.reduce((s, p) => s + p.length, 0);
     let sent = 0;
@@ -608,7 +621,7 @@ async function print() {
     let reconnects = 0;
     for (let n = 0; n < chunks.length; n++) {
       try {
-        await send(chunks[n], delay);
+        await send(chunks[n], delay, safe);
       } catch (e) {
         // La liaison s'est coupée en pleine impression : on se reconnecte
         // et on renvoie le paquet en cours (3 fois au maximum).
@@ -618,7 +631,7 @@ async function print() {
         await ensureConnected();
         // Après une coupure, l'imprimante a oublié les réglages : on les renvoie
         // (qualité, énergie, type d'image, vitesse) avant de continuer.
-        for (let k = 0; k < HEADER_PACKETS; k++) await send(list[k], delay);
+        for (let k = 0; k < HEADER_PACKETS; k++) await send(list[k], delay, safe);
         setStatus('Impression…');
         n--;
         continue;
@@ -635,7 +648,8 @@ async function print() {
     const info = `pauses : ${pauseCount}, reconnexions : ${reconnects}, ` +
       (notifOk ? `messages reçus : ${replies}` : 'l\'imprimante ne répond pas') +
       (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
-      (after === null ? '' : `, après : ${after.toString(16).padStart(2, '0')}`);
+      (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
+      (m.gray ? (safe ? ', envoi avec accusé' : ', envoi SANS accusé (non accepté)') : '');
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
