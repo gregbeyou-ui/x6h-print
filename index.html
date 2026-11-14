@@ -80,13 +80,13 @@
       <summary>Réglages avancés</summary>
       <label>Énergie (noirceur) <span id="energyVal"></span></label>
       <input type="range" id="energy" min="2000" max="15000" step="250" value="8000">
-      <label>Vitesse (petit = rapide) <span id="speedVal"></span></label>
-      <input type="range" id="speed" min="10" max="200" step="5" value="30">
+      <label>Vitesse (100 = le plus rapide) <span id="speedVal"></span></label>
+      <input type="range" id="speed" min="0" max="100" step="1" value="90">
       <label>Rythme d'envoi Bluetooth</label>
       <select id="sendSpeed">
         <option value="rapide">Rapide (PC)</option>
-        <option value="normal">Normal</option>
-        <option value="lent">Lent (iPhone, si l'impression s'arrête trop tôt)</option>
+        <option value="normal">Normal (Gris sur iPhone)</option>
+        <option value="lent">Lent (N&amp;B sur iPhone)</option>
       </select>
       <label>Taille des morceaux (mode Gris)</label>
       <select id="grayBloc">
@@ -139,10 +139,16 @@ const CMD = {
 const MODES = {
   nb:   { gray: false, quality: 0x35, energy: 8000, speed: 30,
           hint: 'Noir et blanc : noir profond, texte net, rendu « ticket » granuleux.' },
-  gris: { gray: true,  quality: 0x33, energy: 6500, speed: 40,
+  gris: { gray: true,  quality: 0x33, energy: 6500, speed: 75,
           hint: 'Niveaux de gris : dégradés lisses pour les photos, impression plus lente.' },
 };
 let mode = 'nb';
+
+// Le curseur « Vitesse » va de 0 (le plus lent) à 100 (le plus rapide).
+// L'imprimante, elle, attend l'inverse : un petit nombre = rapide.
+// 100 → 12 (le plus rapide), 0 → 192 (le plus lent) ; 90 → 30 (N&B), 65 → 75 (Gris).
+const sliderToPrinterSpeed = s => Math.round(12 + 1.8 * (100 - s));
+const printerToSliderSpeed = v => Math.round(100 - (v - 12) / 1.8);
 const GAMMA_NB = 1.5;       // éclaircit les gris en noir et blanc (l'imprimante les fonce)
 const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gris
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
@@ -151,7 +157,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v11';
+const VERSION = '14/11 – v12';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -605,7 +611,8 @@ async function print() {
     const before = await askState();
     setStatus('Impression…');
     const energy = +document.getElementById('energy').value;
-    const speed  = +document.getElementById('speed').value;
+    const speedSlider = +document.getElementById('speed').value;
+    const speed = sliderToPrinterSpeed(speedSlider);   // valeur envoyée à l'imprimante
     const m = MODES[mode];
     const list = m.gray ? packetsGray(levels, height, energy, speed, m.quality)
                         : packetsBW(bits, height, energy, speed, m.quality);
@@ -673,7 +680,7 @@ async function print() {
       (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
       (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
       (m.gray ? `, morceaux de ${grayBloc} octets` : '') +
-      `, rythme : ${document.getElementById('sendSpeed').value}, vitesse : ${speed}, énergie : ${energy}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
+      `, rythme : ${document.getElementById('sendSpeed').value}, vitesse : ${speedSlider}/100, énergie : ${energy}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
@@ -720,11 +727,13 @@ document.getElementById('caption').oninput = render;
 /* Choix du mode : chaque mode a sa propre énergie et sa propre vitesse (voir MODES en haut) */
 function setMode(m) {
   mode = m;
-  for (const id of ['energy', 'speed']) {
-    const el = document.getElementById(id);
-    el.value = MODES[m][id];
-    document.getElementById(id + 'Val').textContent = el.value;
-  }
+  document.getElementById('energy').value = MODES[m].energy;
+  document.getElementById('speed').value = printerToSliderSpeed(MODES[m].speed);
+  for (const id of ['energy', 'speed'])
+    document.getElementById(id + 'Val').textContent = document.getElementById(id).value;
+  // Rythme d'envoi Bluetooth trouvé par les essais sur iPhone :
+  // N&B → Lent ; Gris → Normal (en Lent, l'imprimante attend la suite et imprime par à-coups)
+  document.getElementById('sendSpeed').value = (IS_IOS && !MODES[m].gray) ? 'lent' : 'normal';
   document.getElementById('modeHint').textContent = MODES[m].hint;
   for (const b of document.querySelectorAll('#modeRow button'))
     b.className = b.dataset.mode === m ? '' : 'secondary';
@@ -732,7 +741,6 @@ function setMode(m) {
 }
 for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => setMode(b.dataset.mode);
 setMode('nb');
-document.getElementById('sendSpeed').value = IS_IOS ? 'lent' : 'normal';
 document.getElementById('grayBloc').value = IS_IOS ? '100' : '177';
 document.getElementById('version').textContent = 'Version ' + VERSION;
 </script>
