@@ -52,7 +52,11 @@ Il faut un deuxième téléphone.
 3. Recommencer avec l'autre téléphone **en 4G**, Wi-Fi coupé.
 4. Imprimer une photo reçue.
 
+Sur le téléphone de l'ami, avant d'envoyer : bouger **Luminosité** et **Contraste** et regarder l'aperçu.
+
 À noter :
+- [ ] L'aperçu change-t-il quand on bouge les curseurs ?
+- [ ] Le ticket imprimé ressemble-t-il à l'aperçu de l'ami ?
 - [ ] La photo arrive en Wi-Fi ?
 - [ ] La photo arrive en 4G ?
 - [ ] En cas d'échec, le message affiché sur le téléphone de l'ami :

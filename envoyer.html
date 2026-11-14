@@ -22,7 +22,14 @@
   input[type=text] { width:100%; font-size:16px; padding:10px; border-radius:10px; border:1px solid #ccc; background:#fff; }
   .preview { margin:12px 0; display:flex; justify-content:center; align-items:center; min-height:120px;
              border:1px dashed #ccc; border-radius:12px; overflow:hidden; background:#fff; }
-  .preview img { max-width:100%; max-height:360px; display:block; }
+  .preview canvas { width:100%; max-width:384px; display:block; image-rendering:pixelated; }
+  .look label { display:flex; justify-content:space-between; font-size:14px; margin:12px 0 4px; }
+  .look input[type=range] { width:100%; }
+  .look .row { display:flex; gap:10px; align-items:center; margin-top:10px; }
+  .look .check { display:flex; align-items:center; gap:8px; font-size:14px; margin:0; flex:1; }
+  .look .check input { width:22px; height:22px; margin:0; }
+  .look button.small { width:auto; padding:8px 12px; font-size:14px; background:#e8e6e0; color:var(--ink); }
+  .modeLabel { text-align:center; color:var(--muted); font-size:13px; margin-top:-4px; }
   .empty { color:var(--muted); font-size:14px; }
   #status { font-size:14px; color:var(--muted); margin-top:10px; text-align:center; line-height:1.4; }
   #status.ok { color:var(--ok); } #status.err { color:var(--err); }
@@ -32,7 +39,7 @@
 <body>
 <main>
   <h1>📲 Envoyer une photo</h1>
-  <p class="intro">Ta photo part vers le téléphone relié à l'imprimante. Elle sera imprimée sur un petit ticket.</p>
+  <p class="intro">Ta photo part vers l'imprimante et sort sur un petit ticket. Règle la luminosité et le contraste : l'aperçu montre le ticket tel qu'il sera imprimé.</p>
 
   <div class="card">
     <label class="field" for="from">Ton prénom (optionnel)</label>
@@ -41,7 +48,20 @@
 
   <div class="card">
     <label class="filebtn secondary">🖼️ Choisir une photo<input type="file" id="fileInput" accept="image/*"></label>
-    <div class="preview"><img id="previewImg" hidden alt=""><span class="empty" id="emptyMsg">Aucune photo choisie</span></div>
+    <div class="preview"><canvas id="previewCanvas" hidden></canvas><span class="empty" id="emptyMsg">Aucune photo choisie</span></div>
+    <div class="modeLabel" id="modeLabel" hidden></div>
+    <!-- Réglages de la photo : l'aperçu montre exactement le ticket -->
+    <div class="look" id="lookBox" hidden>
+      <label>☀️ Luminosité <span id="brightVal">0</span></label>
+      <input type="range" id="bright" min="-100" max="100" value="0">
+      <label>◐ Contraste <span id="contrastVal">0</span></label>
+      <input type="range" id="contrast" min="-100" max="100" value="0">
+      <div class="row">
+        <label class="check"><input type="checkbox" id="autoEnhance" checked> ✨ Correction auto</label>
+        <button class="small" id="resetLook" hidden>↺ Remettre à zéro</button>
+      </div>
+    </div>
+    <div style="height:12px"></div>
     <button id="sendBtn" disabled>Envoyer</button>
     <div id="status">Connexion au téléphone de l'imprimante…</div>
     <div class="count" id="count"></div>
@@ -49,6 +69,7 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="traitement.js"></script>
 <script>
 /* Page des invités : on se relie directement (WebRTC, via PeerJS) au téléphone
    qui pilote l'imprimante. Son identifiant est dans l'adresse, après le « # ». */
@@ -85,6 +106,8 @@ function openConn() {
   conn = peer.connect(hostId, { reliable: true, serialization: 'binary' });
   conn.on('open', () => { ready = true; updateBtn(); setStatus('Connecté ✓ Choisis une photo puis touche Envoyer.', 'ok'); });
   conn.on('data', d => {
+    // Réglages de l'imprimante (N&B ou Gris) : l'aperçu se met dans le même mode
+    if (d && d.type === 'reglages') { if (d.mode) { hostMode = d.mode; renderPreview(); } return; }
     // Mode borne : le téléphone (ou l'ordinateur) de l'imprimante dit où en est la photo
     if (d && d.type === 'etat') {
       if (d.etat === 'file') setStatus('Photo reçue ✓ Elle va être imprimée…', 'ok');
@@ -130,15 +153,85 @@ function shrink(file) {
   });
 }
 
+/* Aperçu du ticket : même traitement que la page de l'imprimante (traitement.js),
+   dans le mode choisi là-bas (N&B ou Gris), à la taille réelle d'impression
+   (384 points sur le petit côté, puisqu'une photo en largeur est imprimée tournée). */
+let photoImg = null;
+let hostMode = 'nb';        // mode de l'imprimante, envoyé par sa page à la connexion
+const MODE_NAMES = { nb: 'noir et blanc', gris: 'niveaux de gris' };
+
+function lookNow() {
+  return {
+    bright: +document.getElementById('bright').value,
+    contrast: +document.getElementById('contrast').value,
+    auto: document.getElementById('autoEnhance').checked,
+  };
+}
+
+let previewPending = false;
+function renderPreview() {
+  if (!photoImg || previewPending) return;
+  previewPending = true;
+  requestAnimationFrame(() => {               // un seul calcul par image affichée, même si on glisse vite
+    previewPending = false;
+    const w0 = photoImg.naturalWidth, h0 = photoImg.naturalHeight;
+    const k = 384 / (w0 > h0 ? h0 : w0);
+    const w = Math.round(w0 * k), h = Math.round(h0 * k);
+    const c = document.getElementById('previewCanvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.drawImage(photoImg, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h), px = d.data;
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
+    const out = processPhoto(gray, w, h, hostMode === 'gris', lookNow());
+    for (let i = 0; i < out.length; i++) { px[i*4] = px[i*4+1] = px[i*4+2] = out[i]; px[i*4+3] = 255; }
+    g.putImageData(d, 0, 0);
+    c.hidden = false;
+    document.getElementById('emptyMsg').hidden = true;
+    const ml = document.getElementById('modeLabel');
+    ml.hidden = false; ml.textContent = `Aperçu du ticket (${MODE_NAMES[hostMode] || hostMode})`;
+  });
+}
+
+for (const id of ['bright', 'contrast']) {
+  const el = document.getElementById(id);
+  el.oninput = () => { document.getElementById(id + 'Val').textContent = el.value; showReset(); renderPreview(); saveLook(); };
+}
+document.getElementById('autoEnhance').onchange = () => { renderPreview(); saveLook(); };
+function showReset() {
+  document.getElementById('resetLook').hidden =
+    +document.getElementById('bright').value === 0 && +document.getElementById('contrast').value === 0;
+}
+document.getElementById('resetLook').onclick = () => {
+  for (const id of ['bright', 'contrast']) { document.getElementById(id).value = 0; document.getElementById(id + 'Val').textContent = '0'; }
+  showReset(); renderPreview(); saveLook();
+};
+// On garde les réglages d'une photo à l'autre (souvent la même lumière)
+function saveLook() { try { localStorage.setItem('x6h-reglages-ami', JSON.stringify(lookNow())); } catch (_) {} }
+try {
+  const l = JSON.parse(localStorage.getItem('x6h-reglages-ami') || 'null');
+  if (l) {
+    document.getElementById('bright').value = l.bright; document.getElementById('brightVal').textContent = l.bright;
+    document.getElementById('contrast').value = l.contrast; document.getElementById('contrastVal').textContent = l.contrast;
+    document.getElementById('autoEnhance').checked = l.auto !== false;
+    showReset();
+  }
+} catch (_) {}
+
 document.getElementById('fileInput').onchange = async e => {
   const f = e.target.files[0];
   if (!f) return;
   try {
     photo = await shrink(f);
-    const im = document.getElementById('previewImg');
-    im.src = URL.createObjectURL(photo); im.hidden = false;
-    document.getElementById('emptyMsg').hidden = true;
-  } catch (err) { setStatus('Cette photo ne peut pas être lue : ' + err.message, 'err'); photo = null; }
+    photoImg = await new Promise((ok, ko) => {
+      const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error('photo illisible'));
+      im.src = URL.createObjectURL(photo);
+    });
+    document.getElementById('lookBox').hidden = false;
+    renderPreview();
+  } catch (err) { setStatus('Cette photo ne peut pas être lue : ' + err.message, 'err'); photo = null; photoImg = null; }
   e.target.value = '';
   updateBtn();
 };
@@ -154,7 +247,7 @@ sendBtn.onclick = async () => {
     setStatus('Pas de réponse du téléphone de l\'imprimante. Réessaie.', 'err');
   }, 30000);
   try {
-    conn.send({ type: 'photo', from: fromEl.value.trim().slice(0, 30), image: await photo.arrayBuffer() });
+    conn.send({ type: 'photo', from: fromEl.value.trim().slice(0, 30), image: await photo.arrayBuffer(), look: lookNow() });
   } catch (err) {
     setStatus('Envoi impossible : ' + err.message, 'err');
     sendBtn.textContent = 'Envoyer'; updateBtn();

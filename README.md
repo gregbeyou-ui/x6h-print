@@ -27,6 +27,7 @@ Une page web pour imprimer des photos sur une mini-imprimante thermique Bluetoot
 ## Fichiers
 
 - `index.html` : la page (un seul fichier, rien à installer).
-- `envoyer.html` : la page ouverte par les amis via le QR code. Les photos passent directement d'un téléphone à l'autre (WebRTC, bibliothèque PeerJS et son serveur de mise en relation gratuit).
+- `traitement.js` : le traitement des photos pour le papier thermique (correction auto, tramage N&B et Gris), partagé par les deux pages : l'aperçu de l'ami est exactement le ticket.
+- `envoyer.html` : la page ouverte par les amis via le QR code. L'ami y règle luminosité et contraste en voyant l'aperçu du ticket ; la photo est imprimée avec ses réglages. Les photos passent directement d'un téléphone à l'autre (WebRTC, bibliothèque PeerJS et son serveur de mise en relation gratuit).
 - `imprimer_test.py` : script Python (bibliothèque `bleak`) pour imprimer depuis un PC et faire des essais de réglages.
 - `REGLAGES.md` : réglages trouvés par les essais sur une X6h-FC21.

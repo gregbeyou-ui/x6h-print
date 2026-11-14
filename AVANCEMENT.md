@@ -71,6 +71,14 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Réglages de l'ami (v24)
+
+- La page des amis (`envoyer.html`) montre un **aperçu du ticket** (même traitement que l'imprimante, dans le mode choisi sur la page de l'imprimante : N&B ou Gris) et propose **Luminosité**, **Contraste** et **Correction auto**, avec « Remettre à zéro ». Les réglages sont gardés d'une photo à l'autre sur le téléphone de l'ami.
+- Les réglages partent avec la photo. Côté imprimante (et en mode borne), la photo s'imprime avec ces réglages : ils sont repris dans les curseurs quand la photo est choisie, et si on les retouche, la photo garde les nouveaux.
+- Quand on change de mode (N&B ou Gris) sur la page de l'imprimante, l'aperçu des amis connectés change aussi.
+- Le traitement d'image (correction auto, tramages, tableau des teintes) est maintenant dans `traitement.js`, partagé par les deux pages.
+- Testé sur le PC avec deux onglets, pas encore avec de vrais téléphones.
+
 ### Écran simplifié (v23)
 
 - L'écran suit 3 étapes numérotées : ① Imprimante, ② Photo (avec le rendu : N&B ou Gris, **Luminosité** et **Contraste** toujours visibles, case « Correction auto », bouton « Remettre à zéro » qui n'apparaît que si on a touché aux curseurs), ③ Imprimer.
@@ -171,6 +179,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 |---|---|---|
 | `index.html` | La page web | Oui |
 | `envoyer.html` | La page des amis (ouverte par le QR code) | Oui |
+| `traitement.js` | Traitement des photos, partagé par les deux pages | Oui |
 | `imprimer_test.py` | Script Python d'essais (`python imprimer_test.py --help`) | Oui |
 | `REGLAGES.md` | Résultats de tous les essais | Oui |
 | `README.md` | Mode d'emploi de la page | Oui |
