@@ -78,7 +78,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
   1. Les photos sont réduites dès l'ouverture à 1600 points au plus (JPEG) au lieu de 12 millions de points : beaucoup moins de mémoire, donc moins de rechargements.
   2. Photos (seule, série, amis) et réglages (recadrage, sens, série, texte, luminosité, contraste, amélioration, mode) sont gardés dans le navigateur (IndexedDB) à chaque changement, et rechargés à l'ouverture de la page. Message « Ton travail a été retrouvé ✓ ». Les photos qui ne servent plus sont effacées.
 - Bouton « 🗑️ Effacer les photos reçues » dans le panneau Amis (sinon elles restent d'une soirée à l'autre). Le bouton Amis affiche le nombre de photos reçues.
-- Testé sur le PC (rechargement de la page), pas encore sur l'iPhone.
+- Essayé sur l'iPhone le 14/11/2026 : les photos restent après la connexion de l'imprimante (« ça a l'air », à confirmer à l'usage).
 
 ### Plusieurs photos et amélioration automatique (v17)
 
