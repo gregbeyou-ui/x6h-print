@@ -148,7 +148,7 @@ const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gri
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
 const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v8';
+const VERSION = '14/11 – v9';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -370,7 +370,10 @@ async function send(p, delay = 0, safe = false, size = BLOC) {
     while (paused && Date.now() - t0 < 30000) await sleep(20);
     paused = false;
     if (!writeChar) throw new Error('liaison coupée');
-    const part = p.subarray(i, i + size);
+    // slice (et non subarray) : on fabrique une vraie copie du morceau. Avec une simple
+    // « fenêtre » sur le gros paquet, Bluefy envoie le début du paquet entier au lieu
+    // du morceau voulu : en mode Gris, l'imprimante ne recevait que du charabia.
+    const part = p.slice(i, i + size);
     if (withAck) {
       if (writeChar.writeValueWithResponse) await writeChar.writeValueWithResponse(part);
       else await writeChar.writeValue(part);
