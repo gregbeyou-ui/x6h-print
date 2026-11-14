@@ -71,6 +71,14 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Écran simplifié (v23)
+
+- L'écran suit 3 étapes numérotées : ① Imprimante, ② Photo (avec le rendu : N&B ou Gris, **Luminosité** et **Contraste** toujours visibles, case « Correction auto », bouton « Remettre à zéro » qui n'apparaît que si on a touché aux curseurs), ③ Imprimer.
+- Le texte sous la photo, la date et le lieu, « Faire avancer le papier » et les réglages de l'imprimante sont rangés dans « ⚙️ Plus d'options ». Près du bouton Imprimer, un rappel indique ce qui sera ajouté en bas du ticket.
+- Pastille d'état en haut à droite : ⚪ Pas connectée · 🟡 En veille · 🟢 Prête (· 🔋 faible) · 🖨️ Impression · 🔴 Plus de papier / Capot ouvert. Elle s'appuie sur l'état demandé à l'imprimante toutes les 8 secondes.
+- Message de fin simple sous le bouton Imprimer (« ✓ Imprimé en 18 s »), avec les détails techniques repliés dans « Détails ». Quand le bouton est grisé faute d'imprimante : « Connecte d'abord l'imprimante (étape 1) ».
+- Retour de l'utilisateur à l'origine de ce changement : la correction automatique ne suffit pas à rendre toutes les photos propres (visages pas toujours bien distincts), d'où les curseurs gardés bien en vue.
+
 ### Mode borne sur le PC (v22)
 
 - But : qu'un ami **sans Bluefy** puisse imprimer tout seul, grâce au PC toujours allumé, sans rien acheter. Le PC remplace l'iPhone : Chrome (ou Edge) sous Windows parle en Bluetooth à l'imprimante.

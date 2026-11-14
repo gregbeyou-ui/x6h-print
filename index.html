@@ -67,6 +67,27 @@
   .cropRect i::after { content:''; position:absolute; inset:-14px; }
   .cropActions button.secondary { background:#333; color:#fff; }
   .cropActions button:not(.secondary) { background:#fff; color:#111; }
+  /* Écran en 3 étapes */
+  .top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 16px; }
+  .top h1 { margin:0; }
+  .pill { font-size:13px; font-weight:600; padding:6px 10px; border-radius:20px; background:#fff; white-space:nowrap;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .pill.ok { color:var(--ok); } .pill.err { color:var(--err); }
+  .step { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:700; margin-bottom:12px; }
+  .step span { display:inline-flex; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff;
+               align-items:center; justify-content:center; font-size:13px; }
+  .sub { font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:20px 0 8px; }
+  .center { text-align:center; }
+  .tools { align-items:center; margin-top:10px; }
+  .tools label.check { margin:0; }
+  .tools button.small { margin:0; flex:0 0 auto; width:auto; padding:8px 12px; }
+  label.check.small { font-size:14px; }
+  #printMsg { text-align:center; font-size:16px; font-weight:600; margin-top:12px; min-height:20px; }
+  #printMsg.ok { color:var(--ok); } #printMsg.err { color:var(--err); }
+  #printDetailsBox summary { text-align:center; margin-top:6px; }
+  #extrasHint { margin:0 0 10px; }
+  details.more > summary { font-size:15px; font-weight:600; color:var(--ink); margin:0; }
+  details.more[open] > summary { margin-bottom:6px; }
   .thumb b.wait { background:#e65100; }
   .thumb b.busy { background:#1d1d1f; }
   .thumb .pick { position:absolute; bottom:26px; right:4px; width:24px; height:24px; border-radius:50%; background:#fff;
@@ -76,20 +97,25 @@
 </head>
 <body>
 <main>
-  <h1>🧾 X6h Print</h1>
+  <div class="top">
+    <h1>🧾 X6h Print</h1>
+    <span class="pill" id="pill">⚪ Pas connectée</span>
+  </div>
 
-  <!-- 1. Connexion -->
+  <!-- ① Imprimante -->
   <div class="card">
+    <div class="step"><span>1</span> Imprimante</div>
     <button id="connectBtn">Connecter l'imprimante</button>
-    <div id="status">Non connectée</div>
+    <div id="status">Allume l'imprimante, puis touche le bouton.</div>
     <div id="btHelp" class="help" hidden>
       <div id="btHelpText"></div>
       <a id="openChrome" class="filebtn" hidden>Ouvrir dans Chrome</a>
     </div>
   </div>
 
-  <!-- 2. Photo -->
+  <!-- ② Photo(s) et réglages de l'image -->
   <div class="card">
+    <div class="step"><span>2</span> Photo</div>
     <div class="row row3">
       <label class="filebtn">📷 Photo<input type="file" id="camInput" accept="image/*" capture="environment"></label>
       <label class="filebtn secondary">🖼️ Galerie<input type="file" id="galInput" accept="image/*" multiple></label>
@@ -101,9 +127,9 @@
       <div class="hint" id="guestStatus">Préparation du QR code…</div>
       <div style="height:8px"></div>
       <button class="secondary" id="shareBtn" hidden>Envoyer le lien par message</button>
-      <div class="hint">Les amis scannent le QR code avec l'appareil photo de leur téléphone, puis envoient leurs photos. Garde cette page ouverte à l'écran pendant ce temps. Touche une photo reçue pour la préparer.</div>
+      <div class="hint">Les amis scannent le QR code avec l'appareil photo de leur téléphone et envoient leurs photos. Garde cette page ouverte pendant ce temps. Touche une photo reçue pour la préparer.</div>
       <label class="check"><input type="checkbox" id="borneOn"> 🖨️ Mode borne : imprimer tout seul chaque photo reçue</label>
-      <div class="hint">Pour un ordinateur qui reste allumé près de l'imprimante : les amis envoient leurs photos et elles sortent sans toucher à rien.</div>
+      <div class="hint">Pour un ordinateur qui reste allumé près de l'imprimante.</div>
       <div id="borneWait" class="help" hidden>
         <div id="borneWaitText"></div>
         <button id="borneResumeBtn" style="margin-top:10px">✅ Réimprimer les photos cochées</button>
@@ -111,30 +137,55 @@
       <div class="thumbs" id="guestList"></div>
       <button class="secondary small" id="clearGuestsBtn" hidden>🗑️ Effacer les photos reçues</button>
     </div>
+
     <div class="preview" style="margin-top:12px">
       <canvas id="canvas" hidden></canvas>
-      <span class="empty" id="emptyMsg">Aucune photo choisie</span>
+      <span class="empty" id="emptyMsg">Prends une photo ou choisis-en dans la galerie</span>
     </div>
     <div class="row" style="margin-top:10px">
       <button class="secondary" id="cropBtn" disabled>✂️ Recadrer</button>
-      <button class="secondary" id="rotateBtn" disabled>↻ Tourner de 90°</button>
+      <button class="secondary" id="rotateBtn" disabled>↻ Tourner</button>
     </div>
-    <div class="hint" id="orientHint" style="text-align:center"></div>
-    <!-- Plusieurs photos choisies dans la galerie : imprimées à la suite -->
+    <div class="hint center" id="orientHint"></div>
+    <!-- Plusieurs photos choisies dans la galerie : un seul ticket -->
     <div id="batchBox" hidden>
       <div class="hint" id="batchHint"></div>
-      <label class="check"><input type="checkbox" id="twoPerRow"> 2 photos par ligne (ticket deux fois plus court)</label>
+      <label class="check"><input type="checkbox" id="twoPerRow"> 2 photos par ligne (ticket plus court)</label>
       <div class="thumbs" id="batchList"></div>
     </div>
 
-    <label class="check"><input type="checkbox" id="autoEnhance" checked> ✨ Amélioration automatique</label>
-    <div class="hint">Contraste, tons moyens et netteté ajustés à chaque photo, différemment en N&amp;B et en Gris. Les curseurs ci-dessous s'ajoutent par-dessus.</div>
-    <label>Luminosité <span id="brightVal">0</span></label>
+    <!-- Réglages de l'image : toujours visibles -->
+    <div class="sub">Rendu</div>
+    <div class="row" id="modeRow">
+      <button data-mode="nb">⚡ N&amp;B</button>
+      <button class="secondary" data-mode="gris">✨ Gris</button>
+    </div>
+    <div class="hint" id="modeHint"></div>
+    <label>☀️ Luminosité <span id="brightVal">0</span></label>
     <input type="range" id="bright" min="-100" max="100" value="0">
-    <label>Contraste <span id="contrastVal">0</span></label>
+    <label>◐ Contraste <span id="contrastVal">0</span></label>
     <input type="range" id="contrast" min="-100" max="100" value="0">
+    <div class="row tools">
+      <label class="check small"><input type="checkbox" id="autoEnhance" checked> ✨ Correction auto</label>
+      <button class="secondary small" id="resetLook" hidden>↺ Remettre à zéro</button>
+    </div>
+  </div>
 
-    <label>Texte sous la photo (optionnel)</label>
+  <!-- ③ Imprimer -->
+  <div class="card">
+    <div class="step"><span>3</span> Imprimer</div>
+    <div class="hint center" id="extrasHint" hidden></div>
+    <button id="printBtn" disabled>Imprimer</button>
+    <div class="progress"><div id="bar"></div></div>
+    <div id="printMsg"></div>
+    <details id="printDetailsBox" hidden><summary>Détails</summary><div class="hint" id="printDetails"></div></details>
+  </div>
+
+  <!-- Options moins utilisées -->
+  <details class="card more">
+    <summary>⚙️ Plus d'options : texte, date et lieu, imprimante</summary>
+
+    <label>Texte sous la photo</label>
     <input type="text" id="caption" placeholder="ex. Soirée du 13/11">
 
     <label class="check"><input type="checkbox" id="stampOn"> 📍 Date et lieu en bas du ticket</label>
@@ -147,15 +198,10 @@
       <div class="hint" id="stampHint"></div>
     </div>
 
-    <label>Mode</label>
-    <div class="row" id="modeRow">
-      <button data-mode="nb">⚡ N&amp;B</button>
-      <button class="secondary" data-mode="gris">✨ Gris</button>
-    </div>
-    <div class="hint" id="modeHint"></div>
+    <button id="feedBtn" class="secondary small" style="margin-top:16px" disabled>Faire avancer le papier</button>
 
     <details>
-      <summary>Réglages avancés</summary>
+      <summary>Réglages de l'imprimante (si l'impression pose problème)</summary>
       <label>Énergie (noirceur) <span id="energyVal"></span></label>
       <input type="range" id="energy" min="2000" max="15000" step="250" value="8000">
       <label>Vitesse (100 = le plus rapide) <span id="speedVal"></span></label>
@@ -174,16 +220,8 @@
         <option value="20">20 octets (très lent, si rien ne sort)</option>
       </select>
     </details>
-  </div>
-
-  <!-- 3. Impression -->
-  <div class="card">
-    <button id="printBtn" disabled>Imprimer</button>
-    <div class="progress"><div id="bar"></div></div>
-    <div style="height:10px"></div>
-    <button id="feedBtn" class="secondary" disabled>Faire avancer le papier</button>
-  </div>
-  <div class="hint" id="version" style="text-align:center"></div>
+  </details>
+  <div class="hint center" id="version"></div>
 </main>
 
 <!-- Fenêtre de recadrage : on déplace le cadre, on tire ses coins -->
@@ -240,9 +278,9 @@ const CMD = {
    - gris : chaque point a 16 niveaux de chauffe ; dégradés lisses, plus lent */
 const MODES = {
   nb:   { gray: false, quality: 0x35, energy: 8000, speed: 30,
-          hint: 'Noir et blanc : noir profond, texte net, rendu « ticket » granuleux.' },
+          hint: 'Noir et blanc : net et rapide, rendu « ticket » granuleux.' },
   gris: { gray: true,  quality: 0x33, energy: 6500, speed: 75,
-          hint: 'Niveaux de gris : dégradés lisses pour les photos, impression plus lente.' },
+          hint: 'Gris : dégradés doux pour les photos, impression plus lente.' },
 };
 let mode = 'nb';
 
@@ -259,7 +297,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v22';
+const VERSION = '14/11 – v23';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -323,7 +361,37 @@ async function askState() {
 }
 const statusEl = document.getElementById('status');
 
-function setStatus(text, kind = '') { statusEl.textContent = text; statusEl.className = kind; }
+function setStatus(text, kind = '') {
+  statusEl.textContent = text; statusEl.className = kind;
+  // pendant une impression, les messages de liaison (reconnexion…) s'affichent aussi près du bouton Imprimer
+  if (typeof printing !== 'undefined' && printing && /connexion|Liaison/i.test(text)) setPrint(text, kind);
+  updatePill();
+}
+
+// Message sous le bouton Imprimer, avec les détails techniques repliés
+function setPrint(text, kind = '', details = '') {
+  const el = document.getElementById('printMsg');
+  el.textContent = text; el.className = kind;
+  document.getElementById('printDetails').textContent = details;
+  document.getElementById('printDetailsBox').hidden = !details;
+}
+
+// Pastille en haut de l'écran : l'état de l'imprimante d'un coup d'œil
+function updatePill() {
+  const pill = document.getElementById('pill');
+  if (!pill) return;
+  let text = '⚪ Pas connectée', kind = '';
+  if (typeof device !== 'undefined' && device) {
+    const s = typeof printerState !== 'undefined' ? printerState : null;
+    if (s !== null && (s & 0x01)) { text = '🔴 Plus de papier'; kind = 'err'; }
+    else if (s !== null && (s & 0x02)) { text = '🔴 Capot ouvert'; kind = 'err'; }
+    else if (typeof printing !== 'undefined' && printing) { text = '🖨️ Impression'; kind = 'ok'; }
+    else if (writeChar) { text = (s !== null && (s & 0x08)) ? '🟢 Prête · 🔋 faible' : '🟢 Prête'; kind = 'ok'; }
+    else text = '🟡 En veille';
+  }
+  pill.textContent = text; pill.className = 'pill ' + kind;
+}
+setInterval(updatePill, 2000);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Abandonne une étape qui ne répond pas au bout de « ms » millisecondes
@@ -819,7 +887,25 @@ function render() {
   }
   showOrientation();
   finishRender(photoH, regions, stamp, stampH);
+  // Rappel, près du bouton Imprimer, de ce qui sera ajouté (réglé dans « Plus d'options »)
+  const extras = [caption && `texte « ${caption} »`, stamp && `« ${stamp} »`].filter(Boolean);
+  const ex = document.getElementById('extrasHint');
+  ex.hidden = !extras.length;
+  ex.textContent = extras.length ? 'Ajouté en bas : ' + extras.join(' et ') : '';
 }
+
+// Bouton « Remettre à zéro » : visible seulement si luminosité ou contraste ont été touchés
+function showResetLook() {
+  document.getElementById('resetLook').hidden =
+    +document.getElementById('bright').value === 0 && +document.getElementById('contrast').value === 0;
+}
+document.getElementById('resetLook').onclick = () => {
+  for (const id of ['bright', 'contrast']) {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + 'Val').textContent = '0';
+  }
+  showResetLook(); render(); scheduleSave();
+};
 
 // Une seule photo : le texte tourne avec elle
 function layoutSingle(caption, stampH) {
@@ -1020,6 +1106,7 @@ async function restoreState() {
       document.getElementById(id).value = st[id] ?? 0;
       document.getElementById(id + 'Val').textContent = document.getElementById(id).value;
     }
+    showResetLook();
     document.getElementById('autoEnhance').checked = st.autoEnhance !== false;
     // Photos des amis
     for (const g of st.guests || []) {
@@ -1168,7 +1255,7 @@ async function print() {
       lastProblem = stateProblem(before & BLOCKING_STATE);
       throw new Error('l\'imprimante signale : ' + lastProblem);
     }
-    setStatus(printLabel + 'Impression…');
+    setPrint(printLabel + '🖨️ Impression en cours…');
     const energy = +document.getElementById('energy').value;
     const speedSlider = +document.getElementById('speed').value;
     const speed = sliderToPrinterSpeed(speedSlider);   // valeur envoyée à l'imprimante
@@ -1240,18 +1327,24 @@ async function print() {
       (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
       (m.gray ? `, morceaux de ${grayBloc} octets` : '') +
       `, rythme : ${document.getElementById('sendSpeed').value}, vitesse : ${speedSlider}/100, énergie : ${energy}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
-    const problem = stateProblem(after ?? before);
-    if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
-    else setStatus(`Envoyé ✓ (${info})`, 'ok');
     // Papier fini ou capot ouvert pendant l'impression : le ticket est sûrement incomplet.
     // (Une batterie faible n'empêche pas l'impression : simple avertissement.)
     const blocking = (after ?? 0) & (BLOCKING_STATE & 0x03);
     ok = !blocking;
-    if (blocking) lastProblem = stateProblem(blocking);
+    const secs = Math.round((Date.now() - t0) / 1000);
+    const lowBattery = ((after ?? before ?? 0) & 0x08) ? ' · 🔋 batterie faible' : '';
+    if (blocking) {
+      lastProblem = stateProblem(blocking);
+      setPrint(`⚠️ Ticket sûrement incomplet : ${lastProblem}.`, 'err', info);
+    } else setPrint(`${printLabel}✓ Imprimé en ${secs} s${lowBattery}`, 'ok', info);
+    setStatus('Connectée à ' + (device.name || 'l\'imprimante') + ' ✓', 'ok');
     if (currentGuest && ok) { currentGuest.printed = true; renderGuests(); scheduleSave(); }
   } catch (e) {
-    setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
     if (!lastProblem) lastProblem = e.message;
+    setPrint('⚠️ ' + (/papier|capot|chaude/.test(lastProblem) ? 'Impossible d\'imprimer : ' + lastProblem + '.'
+                      : 'L\'impression n\'a pas abouti. Vérifie que l\'imprimante est allumée et réessaie.'),
+             'err', e.message);
+    setStatus('Problème : ' + lastProblem, 'err');
   }
   printing = false; updateButtons();
   setTimeout(() => (bar.style.width = '0'), 1500);
@@ -1766,7 +1859,14 @@ function updateButtons() {
   document.getElementById('feedBtn').disabled  = !device || printing;
   document.getElementById('rotateBtn').disabled = !sourceImg || printing;
   document.getElementById('cropBtn').disabled = !sourceImg || printing;
-  document.getElementById('connectBtn').textContent = device ? 'Changer d\'imprimante' : 'Connecter l\'imprimante';
+  const cb = document.getElementById('connectBtn');
+  cb.textContent = device ? 'Changer d\'imprimante' : 'Connecter l\'imprimante';
+  cb.className = device ? 'secondary' : '';     // une fois connectée, ce bouton passe au second plan
+  // Bouton Imprimer grisé faute d'imprimante : on dit pourquoi
+  const pm = document.getElementById('printMsg'), NEED = 'Connecte d\'abord l\'imprimante (étape 1).';
+  if (!device && (bits || levels) && !pm.textContent) setPrint(NEED);
+  else if (device && pm.textContent === NEED) setPrint('');
+  updatePill();
 }
 
 document.getElementById('connectBtn').onclick = connect;
@@ -1794,7 +1894,7 @@ for (const id of ['bright', 'contrast', 'energy', 'speed']) {
   const el = document.getElementById(id), out = document.getElementById(id + 'Val');
   const show = () => { if (out) out.textContent = el.value; };
   show();
-  el.oninput = () => { show(); if (id === 'bright' || id === 'contrast') { render(); scheduleSave(); } };
+  el.oninput = () => { show(); if (id === 'bright' || id === 'contrast') { showResetLook(); render(); scheduleSave(); } };
 }
 document.getElementById('caption').oninput = () => { render(); scheduleSave(); };
 
