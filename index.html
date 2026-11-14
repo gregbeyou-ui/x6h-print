@@ -88,7 +88,7 @@
   <div class="card">
     <div class="row row3">
       <label class="filebtn">📷 Photo<input type="file" id="camInput" accept="image/*" capture="environment"></label>
-      <label class="filebtn secondary">🖼️ Galerie<input type="file" id="galInput" accept="image/*"></label>
+      <label class="filebtn secondary">🖼️ Galerie<input type="file" id="galInput" accept="image/*" multiple></label>
       <button class="secondary" id="guestBtn">📲 Amis</button>
     </div>
     <!-- Photos des amis : ils scannent le QR code et envoient leurs photos ici -->
@@ -109,11 +109,18 @@
       <button class="secondary" id="rotateBtn" disabled>↻ Tourner de 90°</button>
     </div>
     <div class="hint" id="orientHint" style="text-align:center"></div>
+    <!-- Plusieurs photos choisies dans la galerie : imprimées à la suite -->
+    <div id="batchBox" hidden>
+      <div class="hint" id="batchHint"></div>
+      <div class="thumbs" id="batchList"></div>
+    </div>
 
+    <label class="check"><input type="checkbox" id="autoEnhance" checked> ✨ Amélioration automatique</label>
+    <div class="hint">Contraste, tons moyens et netteté ajustés à chaque photo pour le papier thermique. Les curseurs ci-dessous s'ajoutent par-dessus.</div>
     <label>Luminosité <span id="brightVal">0</span></label>
     <input type="range" id="bright" min="-100" max="100" value="0">
     <label>Contraste <span id="contrastVal">0</span></label>
-    <input type="range" id="contrast" min="-100" max="100" value="20">
+    <input type="range" id="contrast" min="-100" max="100" value="0">
 
     <label>Texte sous la photo (optionnel)</label>
     <input type="text" id="caption" placeholder="ex. Soirée du 13/11">
@@ -161,6 +168,7 @@
   <div class="card">
     <button id="printBtn" disabled>Imprimer</button>
     <div class="progress"><div id="bar"></div></div>
+    <button id="batchPrintBtn" style="margin-top:10px" hidden disabled></button>
     <div style="height:10px"></div>
     <button id="feedBtn" class="secondary" disabled>Faire avancer le papier</button>
   </div>
@@ -240,7 +248,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v16';
+const VERSION = '14/11 – v17';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -510,6 +518,51 @@ function atkinson(gray, w, h) {
   return out;
 }
 
+/* Amélioration automatique pour le papier thermique (méthode courante pour ces
+   imprimantes : on étire les niveaux, on règle les tons moyens, on accentue un peu
+   les contours, puis seulement on fait le tramage).
+   - Étirement : les 1 % de points les plus sombres deviennent noirs, les 1 % les plus
+     clairs deviennent blancs. Une photo terne ou sombre retrouve tout son contraste.
+   - Tons moyens : la photo est éclaircie ou foncée pour que sa moyenne tombe vers
+     le gris moyen (le tramage rend mal les photos très sombres).
+   - Netteté : un léger « masque flou » rend les contours plus francs, ce que le
+     tramage a tendance à adoucir.
+   On ne travaille que sur les h premières lignes (la photo, pas la date en bas). */
+function enhance(gray, w, h) {
+  const n = w * h;
+  if (!n) return;
+  // a) étirement des niveaux
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, gray[i] | 0))]++;
+  let lo = 0, hi = 255, acc = 0;
+  while (lo < 255 && (acc += hist[lo]) < n * 0.01) lo++;
+  acc = 0;
+  while (hi > 0 && (acc += hist[hi]) < n * 0.01) hi--;
+  if (hi - lo < 32) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 16); hi = Math.min(255, mid + 16); }
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const v = Math.max(0, Math.min(255, (gray[i] - lo) * 255 / (hi - lo)));
+    gray[i] = v; sum += v;
+  }
+  // b) tons moyens : on vise une moyenne un peu claire (0,55), le papier thermique fonce
+  const mean = Math.max(0.05, Math.min(0.95, sum / n / 255));
+  const gamma = Math.max(0.6, Math.min(1.7, Math.log(0.55) / Math.log(mean)));
+  if (Math.abs(gamma - 1) > 0.03)
+    for (let i = 0; i < n; i++) gray[i] = 255 * Math.pow(gray[i] / 255, gamma);
+  // c) netteté : on ajoute 60 % de la différence avec une version floue (flou 3×3)
+  const blur = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - 1) * w, y1 = y * w, y2 = Math.min(h - 1, y + 1) * w;
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - 1), x2 = Math.min(w - 1, x + 1);
+      blur[y1 + x] = (gray[y0 + x0] + 2 * gray[y0 + x] + gray[y0 + x2] +
+                      2 * gray[y1 + x0] + 4 * gray[y1 + x] + 2 * gray[y1 + x2] +
+                      gray[y2 + x0] + 2 * gray[y2 + x] + gray[y2 + x2]) / 16;
+    }
+  }
+  for (let i = 0; i < n; i++) gray[i] = Math.max(0, Math.min(255, gray[i] + 0.6 * (gray[i] - blur[i])));
+}
+
 // Mode gris : transforme des gris (0 à 255) en niveaux de chauffe de 0 (blanc) à 15 (noir).
 // Même calcul que l'appli Tiny Print : 14 paliers, l'erreur d'arrondi est répartie
 // sur les points voisins (Floyd-Steinberg).
@@ -552,11 +605,21 @@ function srcRect() {
 }
 function autoRotation() { const r = srcRect(); return r.w > r.h ? 90 : 0; }
 
-function loadFile(file) {
-  if (!file) return;
-  const img = new Image();
-  img.onload = () => { sourceImg = img; crop = null; rotation = autoRotation(); render(); };
-  img.src = URL.createObjectURL(file);
+// Charge une photo. opts = { crop, rotation } pour retrouver les réglages d'une photo
+// de la série. Renvoie une promesse tenue quand l'aperçu est prêt.
+function loadFile(file, opts = null) {
+  if (!file) return Promise.resolve();
+  return new Promise(ok => {
+    const img = new Image();
+    img.onload = () => {
+      sourceImg = img;
+      crop = opts ? opts.crop : null;
+      rotation = opts && opts.rotation !== null ? opts.rotation : autoRotation();
+      render(); ok();
+    };
+    img.onerror = () => { setStatus('Cette photo ne peut pas être lue.', 'err'); ok(); };
+    img.src = URL.createObjectURL(file);
+  });
 }
 
 function showOrientation() {
@@ -599,6 +662,8 @@ function render() {
 
   // 2) On tourne le tout pour l'imprimante (toujours 384 points de large)
   const photoH = turned ? comp.width : comp.height;
+  // Photo d'une série : on retient son recadrage et son sens
+  if (currentBatch) { currentBatch.crop = crop; currentBatch.rotation = rotation; }
   // 3) Date et lieu : une petite ligne en bas du ticket, toujours dans le sens du papier
   const stamp = stampText();
   const stampH = stamp ? 30 : 0;
@@ -618,13 +683,12 @@ function render() {
 
   const imgData = ctx.getImageData(0, 0, WIDTH, height);
   const px = imgData.data;
-  // 1) niveaux de gris + luminosité + contraste
+  // 1) niveaux de gris, amélioration automatique, puis luminosité + contraste réglés à la main
   const gray = new Float32Array(WIDTH * height);
-  for (let i = 0; i < gray.length; i++) {
-    let g = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
-    g = k * (g - 128) + 128 + bright;
-    gray[i] = Math.max(0, Math.min(255, g));
-  }
+  for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
+  if (document.getElementById('autoEnhance').checked) enhance(gray, WIDTH, photoH);
+  for (let i = 0; i < gray.length; i++)
+    gray[i] = Math.max(0, Math.min(255, k * (gray[i] - 128) + 128 + bright));
   if (MODES[mode].gray) {
     // 2) mode gris : chaque point reçoit un niveau de chauffe de 0 (blanc) à 15 (noir)
     bits = null;
@@ -750,16 +814,19 @@ function packetsGray(levels, h, energy, speed, quality) {
    IMPRESSION
    ===================================================================== */
 let printing = false;
+let printLabel = '';   // ex. « Photo 2 sur 3 — » pendant une série
 
+// Renvoie true si l'impression s'est bien passée
 async function print() {
-  if (!device || !(bits || levels)) return;
+  if (!device || !(bits || levels)) return false;
+  let ok = false;
   printing = true; updateButtons();
   const bar = document.getElementById('bar');
   try {
     await ensureConnected();
     // Avant d'imprimer, on demande son état à l'imprimante (pour le rapport de fin)
     const before = await askState();
-    setStatus('Impression…');
+    setStatus(printLabel + 'Impression…');
     const energy = +document.getElementById('energy').value;
     const speedSlider = +document.getElementById('speed').value;
     const speed = sliderToPrinterSpeed(speedSlider);   // valeur envoyée à l'imprimante
@@ -834,12 +901,15 @@ async function print() {
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
+    ok = !problem;
     if (currentGuest) { currentGuest.printed = true; renderGuests(); }
+    if (currentBatch) { currentBatch.printed = true; renderBatch(); }
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
   }
   printing = false; updateButtons();
   setTimeout(() => (bar.style.width = '0'), 1500);
+  return ok;
 }
 
 async function feed() {
@@ -1009,6 +1079,76 @@ document.getElementById('cropOk').onclick = () => {
 document.getElementById('cropBtn').onclick = openCrop;
 
 /* =====================================================================
+   SÉRIE DE PHOTOS : on en choisit plusieurs dans la galerie, chacune garde
+   son recadrage et son sens, puis on les imprime toutes à la suite.
+   ===================================================================== */
+let batch = [];            // photos de la série : { file, url, crop, rotation, printed }
+let currentBatch = null;   // photo de la série affichée en ce moment
+let batchRunning = false;  // true pendant l'impression de la série
+
+function setBatch(files) {
+  for (const b of batch) URL.revokeObjectURL(b.url);
+  batch = files.map(f => ({ file: f, url: URL.createObjectURL(f), crop: null, rotation: null, printed: false }));
+  currentBatch = null;
+  renderBatch();
+  if (batch.length) chooseBatch(batch[0]);
+}
+
+function chooseBatch(b) {
+  currentBatch = null;            // pour ne pas écraser ses réglages pendant le chargement
+  return loadFile(b.file, { crop: b.crop, rotation: b.rotation }).then(() => {
+    currentBatch = b;
+    b.crop = crop; b.rotation = rotation;
+    currentGuest = null; renderGuests();
+    renderBatch();
+  });
+}
+
+function renderBatch() {
+  const box = document.getElementById('batchBox');
+  const btn = document.getElementById('batchPrintBtn');
+  box.hidden = batch.length < 2;
+  btn.hidden = batch.length < 2;
+  const left = batch.filter(b => !b.printed).length;
+  document.getElementById('batchHint').textContent =
+    `${batch.length} photos choisies. Touche une photo pour la recadrer ou la tourner, ` +
+    `puis imprime-les toutes à la suite.`;
+  btn.textContent = left === batch.length ? `🖨️ Imprimer les ${batch.length} photos à la suite`
+                  : left ? `🖨️ Imprimer les ${left} photos restantes` : '✓ Toutes imprimées — recommencer';
+  const list = document.getElementById('batchList');
+  list.innerHTML = '';
+  batch.forEach((b, i) => {
+    const d = document.createElement('div');
+    d.className = 'thumb' + (b === currentBatch ? ' selected' : '');
+    const im = document.createElement('img'); im.src = b.url; im.alt = '';
+    const name = document.createElement('span'); name.textContent = `Photo ${i + 1}`;
+    d.append(im, name);
+    if (b.printed) { const t = document.createElement('b'); t.textContent = '✓ imprimée'; d.append(t); }
+    d.onclick = () => { if (!batchRunning) chooseBatch(b); };
+    list.append(d);
+  });
+  updateButtons();
+}
+
+async function printBatch() {
+  if (batchRunning || batch.length < 2) return;
+  if (batch.every(b => b.printed)) batch.forEach(b => { b.printed = false; });   // recommencer
+  batchRunning = true; updateButtons();
+  const todo = batch.filter(b => !b.printed);
+  for (let i = 0; i < todo.length; i++) {
+    await chooseBatch(todo[i]);
+    printLabel = `Photo ${i + 1} sur ${todo.length} — `;
+    const ok = await print();
+    printLabel = '';
+    if (!ok) break;                                // problème : on s'arrête, la suite reste à faire
+    if (i < todo.length - 1) await sleep(1500);    // petite pause entre deux tickets
+  }
+  batchRunning = false;
+  renderBatch();
+}
+document.getElementById('batchPrintBtn').onclick = printBatch;
+
+/* =====================================================================
    PHOTOS DES AMIS : un QR code mène à envoyer.html, qui se relie directement
    à ce téléphone (WebRTC, via la bibliothèque PeerJS et son serveur de mise
    en relation gratuit). Les photos arrivent ici sans passer par un serveur à nous.
@@ -1099,6 +1239,7 @@ function addGuestPhoto(blob, from) {
 
 function chooseGuest(g) {
   currentGuest = g;
+  currentBatch = null; renderBatch();
   loadFile(g.blob);
   renderGuests();
 }
@@ -1142,7 +1283,8 @@ document.addEventListener('visibilitychange', () => {
    ===================================================================== */
 function updateButtons() {
   // On garde les boutons actifs même quand la liaison dort : elle se rétablit toute seule
-  document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing;
+  document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing || batchRunning;
+  document.getElementById('batchPrintBtn').disabled = !device || printing || batchRunning;
   document.getElementById('feedBtn').disabled  = !device || printing;
   document.getElementById('rotateBtn').disabled = !sourceImg || printing;
   document.getElementById('cropBtn').disabled = !sourceImg || printing;
@@ -1153,8 +1295,17 @@ document.getElementById('connectBtn').onclick = connect;
 document.getElementById('printBtn').onclick = print;
 document.getElementById('feedBtn').onclick = feed;
 document.getElementById('rotateBtn').onclick = () => { rotation = (rotation + 90) % 360; render(); };
-document.getElementById('camInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
-document.getElementById('galInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
+document.getElementById('camInput').onchange = e => {
+  currentGuest = null; renderGuests(); setBatch([]); loadFile(e.target.files[0]); e.target.value = '';
+};
+document.getElementById('galInput').onchange = e => {
+  const files = [...e.target.files];
+  currentGuest = null; renderGuests();
+  if (files.length > 1) setBatch(files);
+  else { setBatch([]); loadFile(files[0]); }
+  e.target.value = '';
+};
+document.getElementById('autoEnhance').onchange = render;
 
 for (const id of ['bright', 'contrast', 'energy', 'speed']) {
   const el = document.getElementById(id), out = document.getElementById(id + 'Val');

@@ -71,6 +71,16 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Plusieurs photos et amélioration automatique (v17)
+
+- **Série** : la Galerie accepte plusieurs photos. Elles s'affichent en vignettes ; chacune garde son recadrage et son sens. Le bouton « Imprimer les N photos à la suite » les imprime l'une après l'autre (1,5 s entre deux tickets). En cas de problème (papier, batterie), la série s'arrête et le bouton propose les photos restantes.
+- **Amélioration automatique** (case cochée par défaut), appliquée avant le tramage, d'après les méthodes courantes pour les imprimantes thermiques (auto-niveaux, réglage des tons moyens, accentuation de la netteté, puis tramage) :
+  1. étirement des niveaux : 1 % des points les plus sombres → noir, 1 % les plus clairs → blanc ;
+  2. tons moyens : correction gamma pour amener la moyenne à 55 % de clarté (entre 0,6 et 1,7) ;
+  3. netteté : masque flou 3×3, force 0,6.
+- Les curseurs Luminosité et Contraste restent et s'appliquent par-dessus. Le contraste par défaut passe de 20 à 0, puisque l'amélioration s'en charge.
+- Testé dans le navigateur du PC (série simulée sans imprimante), pas encore sur papier.
+
 ### Date et lieu (v16)
 
 - Case « 📍 Date et lieu en bas du ticket » : ajoute une ligne de 30 points (environ 4 mm) en bas, texte de 16 points, toujours dans le sens du papier, même si la photo est tournée.
