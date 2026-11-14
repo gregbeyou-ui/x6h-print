@@ -77,7 +77,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Le texte est imprimé en noir pur (sans tramage, sans luminosité ni contraste) pour rester net.
 - Date du jour remplie toute seule (reste à jour si la page reste ouverte), modifiable.
 - Lieu : localisation du navigateur, puis nom de la ville demandé à Nominatim (OpenStreetMap, gratuit, sans compte). Bouton « 📍 Me localiser » pour recommencer, ou saisie à la main. La case cochée et le dernier lieu sont gardés dans le téléphone.
-- Testé dans le navigateur du PC (avec un lieu d'exemple), pas encore sur l'iPhone ni sur papier.
+- Confirmé sur papier depuis l'iPhone le 14/11/2026 (localisation et texte lisible).
 
 ### Photos des invités (v13) : comment ça marche
 
