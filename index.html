@@ -67,6 +67,10 @@
   .cropRect i::after { content:''; position:absolute; inset:-14px; }
   .cropActions button.secondary { background:#333; color:#fff; }
   .cropActions button:not(.secondary) { background:#fff; color:#111; }
+  .thumb b.wait { background:#e65100; }
+  .thumb b.busy { background:#1d1d1f; }
+  .thumb .pick { position:absolute; bottom:26px; right:4px; width:24px; height:24px; border-radius:50%; background:#fff;
+                 border:2px solid #1d1d1f; font-size:15px; line-height:20px; text-align:center; font-weight:700; }
   .thumb b { position:absolute; top:4px; right:4px; background:var(--ok); color:#fff; font-size:11px; padding:2px 6px; border-radius:8px; }
 </style>
 </head>
@@ -98,6 +102,12 @@
       <div style="height:8px"></div>
       <button class="secondary" id="shareBtn" hidden>Envoyer le lien par message</button>
       <div class="hint">Les amis scannent le QR code avec l'appareil photo de leur téléphone, puis envoient leurs photos. Garde cette page ouverte à l'écran pendant ce temps. Touche une photo reçue pour la préparer.</div>
+      <label class="check"><input type="checkbox" id="borneOn"> 🖨️ Mode borne : imprimer tout seul chaque photo reçue</label>
+      <div class="hint">Pour un ordinateur qui reste allumé près de l'imprimante : les amis envoient leurs photos et elles sortent sans toucher à rien.</div>
+      <div id="borneWait" class="help" hidden>
+        <div id="borneWaitText"></div>
+        <button id="borneResumeBtn" style="margin-top:10px">✅ Réimprimer les photos cochées</button>
+      </div>
       <div class="thumbs" id="guestList"></div>
       <button class="secondary small" id="clearGuestsBtn" hidden>🗑️ Effacer les photos reçues</button>
     </div>
@@ -249,7 +259,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v21';
+const VERSION = '14/11 – v22';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -988,7 +998,8 @@ async function saveState() {
     batch: batch.map(b => ({ id: b.id, crop: b.crop, rotation: b.rotation })),
     batchIndex: batch.indexOf(currentBatch),
     seriesRotation,
-    guests: guestPhotos.map(g => ({ id: g.id, from: g.from, printed: g.printed })),
+    guests: guestPhotos.map(g => ({ id: g.id, from: g.from, printed: g.printed, status: g.status, selected: g.selected })),
+    bornePaused, pauseReason,
     guestIndex: guestPhotos.indexOf(currentGuest),
   };
   try {
@@ -1013,7 +1024,16 @@ async function restoreState() {
     // Photos des amis
     for (const g of st.guests || []) {
       const blob = await readPhoto(g.id);
-      if (blob) guestPhotos.push({ id: g.id, blob, url: URL.createObjectURL(blob), from: g.from, printed: g.printed });
+      if (!blob) continue;
+      // Une photo qui allait s'imprimer quand la page s'est rechargée passe en attente :
+      // on ne relance rien sans ta confirmation.
+      const pending = g.status === 'file' || g.status === 'impression' || g.status === 'attente';
+      guestPhotos.push({ id: g.id, blob, url: URL.createObjectURL(blob), from: g.from, printed: g.printed,
+                         status: pending ? 'attente' : (g.status || ''), selected: pending ? g.selected !== false : false, conn: null });
+    }
+    if (guestPhotos.some(g => g.status === 'attente')) {
+      bornePaused = true;
+      pauseReason = st.bornePaused && st.pauseReason ? st.pauseReason : 'la page a été rechargée';
     }
     // Série
     for (const b of st.batch || []) {
@@ -1127,16 +1147,27 @@ function packetsGray(levels, h, energy, speed, quality) {
 let printing = false;
 let printLabel = '';   // ex. « Photo 2 sur 3 — » pendant une série
 
+// États de l'imprimante qui empêchent d'imprimer : plus de papier (01), capot ouvert (02),
+// tête trop chaude (04). La batterie faible (08) n'empêche pas.
+const BLOCKING_STATE = 0x07;
+let lastProblem = '';   // raison du dernier échec d'impression (pour le mode borne)
+
 // Renvoie true si l'impression s'est bien passée
 async function print() {
-  if (!device || !(bits || levels)) return false;
+  if (!device || !(bits || levels)) { lastProblem = 'imprimante non connectée'; return false; }
   let ok = false;
+  lastProblem = '';
   printing = true; updateButtons();
   const bar = document.getElementById('bar');
   try {
     await ensureConnected();
     // Avant d'imprimer, on demande son état à l'imprimante (pour le rapport de fin)
     const before = await askState();
+    // Plus de papier, capot ouvert ou tête trop chaude : on n'envoie rien
+    if (before !== null && (before & BLOCKING_STATE)) {
+      lastProblem = stateProblem(before & BLOCKING_STATE);
+      throw new Error('l\'imprimante signale : ' + lastProblem);
+    }
     setStatus(printLabel + 'Impression…');
     const energy = +document.getElementById('energy').value;
     const speedSlider = +document.getElementById('speed').value;
@@ -1212,10 +1243,15 @@ async function print() {
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
-    ok = !problem;
-    if (currentGuest) { currentGuest.printed = true; renderGuests(); scheduleSave(); }
+    // Papier fini ou capot ouvert pendant l'impression : le ticket est sûrement incomplet.
+    // (Une batterie faible n'empêche pas l'impression : simple avertissement.)
+    const blocking = (after ?? 0) & (BLOCKING_STATE & 0x03);
+    ok = !blocking;
+    if (blocking) lastProblem = stateProblem(blocking);
+    if (currentGuest && ok) { currentGuest.printed = true; renderGuests(); scheduleSave(); }
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
+    if (!lastProblem) lastProblem = e.message;
   }
   printing = false; updateButtons();
   setTimeout(() => (bar.style.width = '0'), 1500);
@@ -1543,8 +1579,8 @@ async function startGuests(renew = false) {
     conn.on('close', () => { guestLinks = Math.max(0, guestLinks - 1); showGuestState(); });
     conn.on('data', d => {
       if (!d || d.type !== 'photo' || !d.image) return;
-      addGuestPhoto(new Blob([d.image], { type: 'image/jpeg' }), String(d.from || '').slice(0, 30));
       try { conn.send({ type: 'recu' }); } catch (_) {}
+      addGuestPhoto(new Blob([d.image], { type: 'image/jpeg' }), String(d.from || '').slice(0, 30), conn);
     });
   });
   peer.on('disconnected', () => { if (hostPeer === peer && !peer.destroyed) setTimeout(() => { try { peer.reconnect(); } catch (_) {} }, 1500); });
@@ -1558,14 +1594,102 @@ async function startGuests(renew = false) {
   });
 }
 
-function addGuestPhoto(blob, from) {
-  const g = { id: newPhotoId(), blob, url: URL.createObjectURL(blob), from, printed: false };
+function addGuestPhoto(blob, from, conn = null) {
+  // status : '' (rien), 'file' (va s'imprimer), 'impression', 'imprimee', 'attente' (problème)
+  const g = { id: newPhotoId(), blob, url: URL.createObjectURL(blob), from, printed: false, status: '', selected: false, conn };
   savePhoto(g.id, blob);
   guestPhotos.unshift(g);                         // la plus récente en premier
-  if (!sourceImg) chooseGuest(g);                 // aucune photo choisie : on prépare celle-ci
+  if (borneOn()) {
+    if (bornePaused) setWaiting(g);               // imprimante en pause : directement en attente
+    else { g.status = 'file'; notifyGuest(g, 'file'); }
+  } else if (!sourceImg) chooseGuest(g);          // aucune photo choisie : on prépare celle-ci
   renderGuests();
   scheduleSave();
   if (navigator.vibrate) navigator.vibrate(100);
+  borneLoop();
+}
+
+/* ---------------------------------------------------------------------
+   MODE BORNE : chaque photo reçue est imprimée toute seule, dans l'ordre
+   d'arrivée. S'il n'y a plus de papier (ou capot ouvert, imprimante
+   déconnectée…), l'impression se met en pause : la photo en cours et
+   toutes les suivantes vont dans la liste d'attente. Une fois le papier
+   remis, on coche les photos à réimprimer et on confirme.
+   --------------------------------------------------------------------- */
+let bornePaused = false;
+let borneBusy = false;
+let pauseReason = '';
+function borneOn() { return document.getElementById('borneOn').checked; }
+
+// Prévient l'ami (si sa page est encore ouverte) de ce qui arrive à sa photo
+function notifyGuest(g, etat) {
+  try { if (g.conn && g.conn.open) g.conn.send({ type: 'etat', etat }); } catch (_) {}
+}
+
+function setWaiting(g) {
+  g.status = 'attente'; g.selected = true;
+  notifyGuest(g, 'attente');
+}
+
+function pauseBorne(reason) {
+  bornePaused = true; pauseReason = reason;
+  for (const g of guestPhotos) if (g.status === 'file' || g.status === 'impression') setWaiting(g);
+  renderGuests(); scheduleSave();
+}
+
+async function borneLoop() {
+  if (borneBusy || bornePaused || !borneOn()) return;
+  borneBusy = true;
+  try {
+    while (borneOn() && !bornePaused) {
+      // la plus ancienne d'abord (la liste montre la plus récente en premier)
+      const g = [...guestPhotos].reverse().find(x => x.status === 'file');
+      if (!g) break;
+      if (!device) { pauseBorne('l\'imprimante n\'est pas connectée'); break; }
+      while (printing) await sleep(300);
+      g.status = 'impression'; renderGuests();
+      await chooseGuest(g);
+      const ok = await print();
+      if (ok) { g.status = 'imprimee'; g.printed = true; g.selected = false; notifyGuest(g, 'imprimee'); }
+      else { setWaiting(g); pauseBorne(lastProblem || 'problème d\'impression'); }
+      renderGuests(); scheduleSave();
+      await sleep(800);                           // petite pause entre deux tickets
+    }
+  } finally { borneBusy = false; }
+}
+
+// Bouton « Réimprimer les photos cochées » : les cochées repartent, les autres restent en attente
+document.getElementById('borneResumeBtn').onclick = () => {
+  for (const g of guestPhotos) if (g.status === 'attente' && g.selected) { g.status = 'file'; notifyGuest(g, 'file'); }
+  bornePaused = false; pauseReason = '';
+  renderGuests(); scheduleSave();
+  borneLoop();
+};
+
+document.getElementById('borneOn').onchange = () => {
+  try { localStorage.setItem('x6h-borne', borneOn() ? '1' : '0'); } catch (_) {}
+  if (borneOn()) {
+    // Les photos reçues mais pas encore imprimées ne partent pas toutes seules :
+    // seules les nouvelles s'impriment automatiquement.
+    borneLoop();
+  }
+  renderGuests();
+};
+
+function renderBorneWait() {
+  const waiting = guestPhotos.filter(g => g.status === 'attente');
+  const box = document.getElementById('borneWait');
+  box.hidden = !waiting.length;
+  if (!waiting.length) return;
+  const picked = waiting.filter(g => g.selected).length;
+  document.getElementById('borneWaitText').innerHTML =
+    (bornePaused ? `⏸️ <b>Impression en pause</b> : ${pauseReason}.<br>` : '') +
+    `${waiting.length} photo${waiting.length > 1 ? 's' : ''} en attente. Remets du papier (ou connecte l'imprimante), ` +
+    `touche les photos pour les cocher ou décocher, puis confirme.`;
+  const btn = document.getElementById('borneResumeBtn');
+  btn.textContent = picked ? `✅ Réimprimer les ${picked} photo${picked > 1 ? 's' : ''} cochée${picked > 1 ? 's' : ''}`
+                           : bornePaused ? '▶️ Reprendre sans réimprimer' : '';
+  btn.hidden = !picked && !bornePaused;
 }
 
 function chooseGuest(g, opts = null) {
@@ -1586,10 +1710,22 @@ function renderGuests() {
     const im = document.createElement('img'); im.src = g.url; im.alt = '';
     const name = document.createElement('span'); name.textContent = g.from || 'Anonyme';
     d.append(im, name);
-    if (g.printed) { const b = document.createElement('b'); b.textContent = '✓ imprimée'; d.append(b); }
-    d.onclick = () => { chooseGuest(g); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    const badge = (text, cls = '') => { const b = document.createElement('b'); b.textContent = text; b.className = cls; d.append(b); };
+    if (g.status === 'attente') {
+      badge('⏳ en attente', 'wait');
+      const p = document.createElement('i'); p.className = 'pick'; p.textContent = g.selected ? '✓' : ''; d.append(p);
+    } else if (g.status === 'impression') badge('🖨️ en cours', 'busy');
+    else if (g.status === 'file') badge('🕒 à imprimer', 'busy');
+    else if (g.printed) badge('✓ imprimée');
+    d.onclick = () => {
+      // Photo en attente : on la coche ou la décoche pour la réimpression
+      if (g.status === 'attente') { g.selected = !g.selected; renderGuests(); return; }
+      if (borneBusy) return;   // la borne est en train d'imprimer
+      chooseGuest(g); window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
     list.append(d);
   }
+  renderBorneWait();
 }
 
 document.getElementById('guestBtn').onclick = () => {
@@ -1601,6 +1737,7 @@ document.getElementById('clearGuestsBtn').onclick = () => {
   if (!confirm(`Effacer les ${guestPhotos.length} photos reçues ?`)) return;
   for (const g of guestPhotos) URL.revokeObjectURL(g.url);
   guestPhotos = [];
+  bornePaused = false; pauseReason = '';
   if (currentGuest) { currentGuest = null; sourceImg = null; bits = levels = null; canvas.hidden = true;
     document.getElementById('emptyMsg').hidden = false; document.getElementById('orientHint').textContent = ''; updateButtons(); }
   renderGuests();
@@ -1681,6 +1818,14 @@ setMode('nb');
 document.getElementById('grayBloc').value = IS_IOS ? '100' : '177';
 document.getElementById('version').textContent = 'Version ' + VERSION;
 restoreState();   // on retrouve le travail d'avant (photos, recadrages, texte…)
+// Mode borne : on s'en souvient, et on ouvre tout de suite la « boîte aux lettres »
+try {
+  if (localStorage.getItem('x6h-borne') === '1') {
+    document.getElementById('borneOn').checked = true;
+    document.getElementById('guestPanel').hidden = false;
+    startGuests();
+  }
+} catch (_) {}
 </script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Tests à faire (15/11/2026)
 
-À faire sur l'iPhone, dans Bluefy. Avant de commencer : recharger la page et vérifier qu'il est écrit **v21** tout en bas.
+Tests 1 à 7 : sur l'iPhone, dans Bluefy. Test 8 : sur le PC. Avant de commencer : recharger la page et vérifier qu'il est écrit **v22** (ou plus) tout en bas.
 
 Pour chaque test, noter **OK** ou ce qui ne va pas. En cas de problème, recopier le **message de fin** en entier.
 
@@ -67,3 +67,22 @@ Il faut un deuxième téléphone.
 ## 7. Bonus, si tu as le temps
 
 - [ ] En N&B, dans **Réglages avancés**, mettre le **Rythme d'envoi** sur **Normal** : la photo sort-elle en entier ? Plus vite qu'en Lent ? (durée dans le message de fin)
+
+## 8. Mode borne sur le PC
+
+Fermer Bluefy sur l'iPhone d'abord (l'imprimante ne se connecte qu'à un appareil à la fois).
+
+1. Sur le PC, ouvrir https://gregbeyou-ui.github.io/x6h-print/ dans **Chrome**.
+2. **Connecter l'imprimante**, mode **N&B** pour commencer.
+3. Toucher **📲 Amis**, puis cocher **🖨️ Mode borne**.
+4. Avec l'iPhone, dans **Safari** (pas Bluefy), scanner le QR code affiché sur l'écran du PC et envoyer une photo.
+
+À noter :
+- [ ] La photo s'imprime-t-elle toute seule ?
+- [ ] Le message « Ta photo est imprimée ✓ » apparaît-il sur l'iPhone ?
+- [ ] Même chose en 4G, Wi-Fi coupé sur l'iPhone ?
+- [ ] Le mode **Gris** depuis Chrome sur le PC : photo complète, sans bandes manquantes ?
+
+**Test du papier** (si tu peux) : ouvrir le capot (ou enlever le rouleau), puis envoyer une photo.
+- [ ] La photo passe-t-elle « en attente » avec « Impression en pause » ?
+- [ ] Après avoir remis le papier : cocher la photo, confirmer, est-ce qu'elle s'imprime ?

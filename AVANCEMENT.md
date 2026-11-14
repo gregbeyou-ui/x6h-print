@@ -71,6 +71,15 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Mode borne sur le PC (v22)
+
+- But : qu'un ami **sans Bluefy** puisse imprimer tout seul, grâce au PC toujours allumé, sans rien acheter. Le PC remplace l'iPhone : Chrome (ou Edge) sous Windows parle en Bluetooth à l'imprimante.
+- Sur le PC : ouvrir la page dans Chrome, connecter l'imprimante, panneau **📲 Amis**, cocher **🖨️ Mode borne**. Le choix est gardé ; à la réouverture, le panneau et le QR code s'ouvrent tout seuls (il faut seulement reconnecter l'imprimante : Chrome demande un clic pour le Bluetooth).
+- Chaque photo reçue s'imprime toute seule, dans l'ordre d'arrivée, avec les réglages de la page (mode, texte, date et lieu). L'ami voit sur sa page : « Elle va être imprimée… », puis « Ta photo est imprimée ✓ », ou « en attente ».
+- **Liste d'attente** : avant chaque impression, la page demande son état à l'imprimante. Plus de papier, capot ouvert, tête trop chaude ou imprimante déconnectée → rien n'est envoyé, l'impression se met **en pause**, et la photo en cours plus toutes celles qui arrivent ensuite passent **en attente**, cochées. Si le papier finit pendant une impression, la photo passe aussi en attente. Une fois le problème réglé : toucher les photos pour les cocher ou décocher, puis **« Réimprimer les photos cochées »**. Les photos décochées restent en attente. Si la page se recharge, les photos en attente le restent : rien ne repart sans confirmation.
+- Toutes les impressions (pas seulement la borne) refusent maintenant de partir si l'imprimante signale plus de papier, capot ouvert ou tête trop chaude. Une batterie faible ne bloque pas.
+- Testé sur le PC avec une imprimante simulée (panne de papier à la 2e photo), pas encore avec la vraie. Reste à vérifier : que l'imprimante signale bien « plus de papier » (bit 01 de l'état) quand le rouleau est vide.
+
 ### Rendu adapté à chaque mode (v21)
 
 - **Mode Gris, nouveau tramage** : l'ancien calcul (repris de Tiny Print, coefficient 0,9 et 14 paliers) envoyait tous les gris clairs vers les niveaux 3 à 5, qui ne marquent pas le papier : environ le cinquième le plus clair de l'image sortait blanc, et les tons moyens étaient trop foncés. Le nouveau calcul n'utilise que les niveaux qui marquent (0, 5 à 13, 15), chacun avec sa noirceur (tableau `DARKNESS` de la page, estimé d'après les mesures de `REGLAGES.md`), et répartit l'écart sur les voisins (Floyd-Steinberg en serpentin).

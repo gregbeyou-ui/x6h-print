@@ -85,6 +85,13 @@ function openConn() {
   conn = peer.connect(hostId, { reliable: true, serialization: 'binary' });
   conn.on('open', () => { ready = true; updateBtn(); setStatus('Connecté ✓ Choisis une photo puis touche Envoyer.', 'ok'); });
   conn.on('data', d => {
+    // Mode borne : le téléphone (ou l'ordinateur) de l'imprimante dit où en est la photo
+    if (d && d.type === 'etat') {
+      if (d.etat === 'file') setStatus('Photo reçue ✓ Elle va être imprimée…', 'ok');
+      else if (d.etat === 'imprimee') setStatus('Ta photo est imprimée ✓ 🎉 Tu peux en envoyer une autre.', 'ok');
+      else if (d.etat === 'attente') setStatus('Ta photo est en attente : l\'imprimante n\'a plus de papier (ou n\'est pas prête). Elle sera imprimée dès que possible.', 'err');
+      return;
+    }
     if (d && d.type === 'recu') {
       sentCount++;
       setStatus('Photo envoyée ✓ Tu peux en envoyer une autre.', 'ok');

@@ -18,6 +18,7 @@ Une page web pour imprimer des photos sur une mini-imprimante thermique Bluetoot
    - **✂️ Recadrer** : un cadre à déplacer au doigt, coins à tirer, formats Libre / Carré / Portrait / Paysage. « Tout » revient à la photo entière.
    - **📍 Date et lieu** : petite ligne en bas du ticket. La date du jour est remplie toute seule ; le lieu vient de la localisation de l'appareil (nom de la ville trouvé par OpenStreetMap). Les deux se modifient à la main.
    - **Sens d'impression automatique** : une photo en hauteur est imprimée droite, une photo en largeur est tournée de 90° pour s'étaler dans la longueur du papier (image plus grande). Le bouton **↻ Tourner de 90°** change le sens à la main.
+   - **Mode borne** (dans le panneau Amis) : sur un ordinateur qui reste allumé près de l'imprimante (Chrome ou Edge), chaque photo envoyée par un ami s'imprime toute seule. Les amis n'ont pas besoin de Bluefy. Plus de papier, capot ouvert ou imprimante déconnectée : l'impression se met en pause et les photos vont dans une liste d'attente ; une fois le problème réglé, on coche les photos à réimprimer et on confirme.
    - **Travail gardé** : photos (seule, série, amis) et réglages sont gardés dans le téléphone. Si la page se recharge (par exemple en connectant l'imprimante après avoir préparé les photos), tout revient. On peut donc préparer les photos avant de connecter l'imprimante.
 4. Choisir le mode, puis **Imprimer** :
    - **N&B** : noir profond, texte net, rendu granuleux ;
