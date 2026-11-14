@@ -248,7 +248,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v18';
+const VERSION = '14/11 – v19';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -628,6 +628,12 @@ function showOrientation() {
   const r = srcRect();
   const kind = r.w > r.h ? 'Photo en largeur (paysage)' : r.w < r.h ? 'Photo en hauteur (portrait)' : 'Photo carrée';
   const auto = rotation === autoRotation() ? ' (choix automatique)' : '';
+  if (isSeries() && document.getElementById('twoPerRow').checked) {
+    el.textContent = `2 photos par ligne : toutes dans le même sens (tournées de ${seriesRot()}°` +
+      `${seriesRotation === null ? ', choix automatique' : ''}) et de la même taille. ` +
+      `Ticket complet : ${batch.length} photos, ${Math.round(height / 8)} mm.`;
+    return;
+  }
   if (isSeries()) {
     el.textContent = `Photo ${batch.indexOf(currentBatch) + 1} : ${crop ? 'recadrée, ' : ''}tournée de ${rotation}°${auto}. ` +
       `Ticket complet : ${batch.length} photos, ${Math.round(height / 8)} mm.`;
@@ -656,10 +662,33 @@ function photoCell(img, cr, rot, cellW) {
 
 // Assemble la série : 1 ou 2 photos par ligne, le texte une seule fois en bas.
 // Renvoie la hauteur de la partie photos + texte, et la place de chaque photo.
+// 2 photos par ligne : toutes dans le même sens et de la même taille.
+// Les cases font 3 × 4 (en hauteur) une fois imprimées. Sens commun : celui de la
+// majorité des photos (une majorité en largeur → toutes tournées de 90°, pour
+// qu'elles soient le plus grandes possible), ou celui choisi avec « Tourner ».
+let seriesRotation = null;   // null = automatique
+function seriesRot() {
+  if (seriesRotation !== null) return seriesRotation;
+  const wide = batch.filter(b => { const s = b.crop || { w: b.img.naturalWidth, h: b.img.naturalHeight }; return s.w > s.h; }).length;
+  return wide > batch.length / 2 ? 90 : 0;
+}
+// Format de la case, vu dans le sens de la photo (largeur / hauteur)
+function seriesCellRatio() { return seriesRot() % 180 ? 4 / 3 : 3 / 4; }
+
+// Partie centrale de la photo (ou de son recadrage) qui remplit la case sans déformer
+function coverRect(img, cr, ratio) {
+  const s = cr ? { ...cr } : { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  if (s.w / s.h > ratio) { const w = s.h * ratio; s.x += (s.w - w) / 2; s.w = w; }
+  else { const h = s.w / ratio; s.y += (s.h - h) / 2; s.h = h; }
+  return s;
+}
+
 function layoutSeries(caption, stampH) {
   const perRow = document.getElementById('twoPerRow').checked ? 2 : 1;
   const cellW = perRow === 2 ? Math.floor((WIDTH - SERIES_GAP) / 2) : WIDTH;
-  const cells = batch.map(b => photoCell(b.img, b.crop, b.rotation, cellW));
+  const cells = perRow === 2
+    ? batch.map(b => photoCell(b.img, coverRect(b.img, b.crop, seriesCellRatio()), seriesRot(), cellW))
+    : batch.map(b => photoCell(b.img, b.crop, b.rotation, cellW));
   const rows = [];
   for (let i = 0; i < cells.length; i += perRow) rows.push(cells.slice(i, i + perRow));
   const rowsH = rows.reduce((s, r) => s + Math.max(...r.map(c => c.height)), 0) + SERIES_GAP * (rows.length - 1);
@@ -1094,6 +1123,12 @@ function fullCropRect() {
 function openCrop() {
   if (!sourceImg) return;
   cropView.hidden = false;
+  // 2 photos par ligne : le cadre prend d'office le format des cases de la série
+  if (isSeries() && document.getElementById('twoPerRow').checked) {
+    cropRatio = seriesRot() % 180 ? 1.3333 : 0.75;
+    for (const b of document.querySelectorAll('#cropRatios button'))
+      b.className = +b.dataset.ratio === cropRatio ? '' : 'secondary';
+  }
   cropImg.onload = () => {
     const k = cropImg.clientWidth / sourceImg.naturalWidth;   // pixels photo → points d'écran
     cr = crop ? { x: crop.x * k, y: crop.y * k, w: crop.w * k, h: crop.h * k } : fullCropRect();
@@ -1185,7 +1220,7 @@ function autoRotationOf(img, cr) {
 
 async function setBatch(files) {
   for (const b of batch) URL.revokeObjectURL(b.url);
-  batch = []; currentBatch = null;
+  batch = []; currentBatch = null; seriesRotation = null;
   if (files.length) setStatus(`Chargement des ${files.length} photos…`);
   const imgs = await Promise.all(files.map(loadImage));
   batch = imgs.filter(Boolean).map(img => ({ img, url: img.src, crop: null, rotation: autoRotationOf(img, null) }));
@@ -1375,7 +1410,12 @@ function updateButtons() {
 document.getElementById('connectBtn').onclick = connect;
 document.getElementById('printBtn').onclick = print;
 document.getElementById('feedBtn').onclick = feed;
-document.getElementById('rotateBtn').onclick = () => { rotation = (rotation + 90) % 360; render(); };
+document.getElementById('rotateBtn').onclick = () => {
+  // 2 photos par ligne : on tourne toute la série ensemble (même sens pour toutes)
+  if (isSeries() && document.getElementById('twoPerRow').checked) seriesRotation = (seriesRot() + 90) % 360;
+  else rotation = (rotation + 90) % 360;
+  render();
+};
 document.getElementById('camInput').onchange = e => {
   currentGuest = null; renderGuests(); setBatch([]); loadFile(e.target.files[0]); e.target.value = '';
 };
