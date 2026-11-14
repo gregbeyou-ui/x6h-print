@@ -71,6 +71,14 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Date et lieu (v16)
+
+- Case « 📍 Date et lieu en bas du ticket » : ajoute une ligne de 30 points (environ 4 mm) en bas, texte de 16 points, toujours dans le sens du papier, même si la photo est tournée.
+- Le texte est imprimé en noir pur (sans tramage, sans luminosité ni contraste) pour rester net.
+- Date du jour remplie toute seule (reste à jour si la page reste ouverte), modifiable.
+- Lieu : localisation du navigateur, puis nom de la ville demandé à Nominatim (OpenStreetMap, gratuit, sans compte). Bouton « 📍 Me localiser » pour recommencer, ou saisie à la main. La case cochée et le dernier lieu sont gardés dans le téléphone.
+- Testé dans le navigateur du PC (avec un lieu d'exemple), pas encore sur l'iPhone ni sur papier.
+
 ### Photos des invités (v13) : comment ça marche
 
 - Le bouton **📲 Amis** affiche un QR code vers `envoyer.html#<identifiant>`. L'identifiant est gardé dans le téléphone : le QR code reste le même d'une fois sur l'autre.

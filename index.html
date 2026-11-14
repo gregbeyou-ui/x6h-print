@@ -34,6 +34,9 @@
   details summary { font-size:14px; color:var(--muted); cursor:pointer; margin-top:10px; }
   .progress { height:6px; background:#e8e6e0; border-radius:3px; overflow:hidden; margin-top:10px; }
   .progress > div { height:100%; width:0; background:var(--accent); transition:width .1s; }
+  label.check { justify-content:flex-start; align-items:center; gap:10px; font-size:15px; margin-top:16px; cursor:pointer; }
+  label.check input { width:22px; height:22px; margin:0; }
+  button.small { padding:10px; font-size:15px; margin-top:8px; }
   .row3 { gap:8px; }
   .row3 .filebtn, .row3 button { padding:14px 4px; font-size:15px; margin:0; display:flex; align-items:center; justify-content:center; }
   #guestPanel { margin-top:12px; padding:12px; border-radius:12px; background:#f8f7f3; }
@@ -114,6 +117,16 @@
 
     <label>Texte sous la photo (optionnel)</label>
     <input type="text" id="caption" placeholder="ex. Soirée du 13/11">
+
+    <label class="check"><input type="checkbox" id="stampOn"> 📍 Date et lieu en bas du ticket</label>
+    <div id="stampFields" hidden>
+      <div class="row">
+        <input type="text" id="stampDate" placeholder="Date">
+        <input type="text" id="stampPlace" placeholder="Lieu">
+      </div>
+      <button class="secondary small" id="locateBtn">📍 Me localiser</button>
+      <div class="hint" id="stampHint"></div>
+    </div>
 
     <label>Mode</label>
     <div class="row" id="modeRow">
@@ -227,7 +240,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v15';
+const VERSION = '14/11 – v16';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -585,10 +598,15 @@ function render() {
   }
 
   // 2) On tourne le tout pour l'imprimante (toujours 384 points de large)
-  height = turned ? comp.width : comp.height;
+  const photoH = turned ? comp.width : comp.height;
+  // 3) Date et lieu : une petite ligne en bas du ticket, toujours dans le sens du papier
+  const stamp = stampText();
+  const stampH = stamp ? 30 : 0;
+  height = photoH + stampH;
   canvas.width = WIDTH; canvas.height = height;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, WIDTH, height);
   ctx.save();
-  ctx.translate(WIDTH / 2, height / 2);
+  ctx.translate(WIDTH / 2, photoH / 2);
   ctx.rotate(rotation * Math.PI / 180);
   ctx.drawImage(comp, -comp.width / 2, -comp.height / 2);
   ctx.restore();
@@ -625,6 +643,21 @@ function render() {
     for (let i = 0; i < bits.length; i++) {
       const v = bits[i] ? 0 : 255;
       px[i*4] = px[i*4+1] = px[i*4+2] = v; px[i*4+3] = 255;
+    }
+  }
+  // 4) Date et lieu : texte en noir pur, sans tramage ni réglages, pour qu'il reste net
+  if (stamp) {
+    const band = document.createElement('canvas'); band.width = WIDTH; band.height = stampH;
+    const b2 = band.getContext('2d');
+    b2.fillStyle = '#fff'; b2.fillRect(0, 0, WIDTH, stampH);
+    b2.fillStyle = '#000'; b2.textAlign = 'center'; b2.textBaseline = 'middle';
+    b2.font = '16px -apple-system, system-ui, sans-serif';
+    b2.fillText(stamp, WIDTH / 2, stampH / 2 + 1, WIDTH - 16);
+    const bd = b2.getImageData(0, 0, WIDTH, stampH).data;
+    for (let i = 0; i < WIDTH * stampH; i++) {
+      const dark = bd[i*4] < 150, j = photoH * WIDTH + i;
+      if (bits) bits[j] = dark ? 1 : 0; else levels[j] = dark ? 15 : 0;
+      px[j*4] = px[j*4+1] = px[j*4+2] = dark ? 0 : 255; px[j*4+3] = 255;
     }
   }
   ctx.putImageData(imgData, 0, 0);
@@ -817,6 +850,68 @@ async function feed() {
   } catch (e) { setStatus('Erreur : ' + e.message, 'err'); }
   updateButtons();
 }
+
+/* =====================================================================
+   DATE ET LIEU en bas du ticket. La date est celle du jour (modifiable).
+   Le lieu vient de la localisation du téléphone ou du PC : on demande les
+   coordonnées au navigateur, puis le nom de la ville au service gratuit
+   d'OpenStreetMap (Nominatim). On peut aussi l'écrire à la main.
+   ===================================================================== */
+const stampOn = document.getElementById('stampOn');
+const stampDate = document.getElementById('stampDate');
+const stampPlace = document.getElementById('stampPlace');
+const stampHint = document.getElementById('stampHint');
+let dateEdited = false;      // true si on a modifié la date à la main
+
+function today() {
+  return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+}
+// Texte imprimé en bas du ticket ('' = rien)
+function stampText() {
+  if (!stampOn.checked) return '';
+  if (!dateEdited) stampDate.value = today();   // reste juste même si la page reste ouverte longtemps
+  return [stampDate.value.trim(), stampPlace.value.trim()].filter(Boolean).join(' · ');
+}
+
+async function locate() {
+  if (!navigator.geolocation) { stampHint.textContent = 'Localisation impossible ici : écris le lieu à la main.'; return; }
+  stampHint.textContent = 'Localisation…';
+  try {
+    const pos = await new Promise((ok, ko) =>
+      navigator.geolocation.getCurrentPosition(ok, ko, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }));
+    const { latitude: lat, longitude: lon } = pos.coords;
+    stampHint.textContent = 'Recherche du nom du lieu…';
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=fr&lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
+    if (!r.ok) throw new Error('service de cartes indisponible');
+    const a = (await r.json()).address || {};
+    const place = a.city || a.town || a.village || a.municipality || a.county || a.state || '';
+    if (!place) throw new Error('lieu inconnu');
+    stampPlace.value = place;
+    try { localStorage.setItem('x6h-lieu', place); } catch (_) {}
+    stampHint.textContent = 'Lieu trouvé ✓ Tu peux le modifier.';
+    render();
+  } catch (e) {
+    const refused = e && e.code === 1;
+    stampHint.textContent = (refused ? 'Localisation refusée' : 'Lieu introuvable (' + (e.message || 'délai dépassé') + ')') +
+      ' : écris le lieu à la main.';
+  }
+}
+
+stampOn.onchange = () => {
+  document.getElementById('stampFields').hidden = !stampOn.checked;
+  try { localStorage.setItem('x6h-date-lieu', stampOn.checked ? '1' : '0'); } catch (_) {}
+  if (stampOn.checked && !stampPlace.value) locate();
+  render();
+};
+stampDate.oninput = () => { dateEdited = stampDate.value.trim() !== ''; render(); };
+stampPlace.oninput = () => { try { localStorage.setItem('x6h-lieu', stampPlace.value); } catch (_) {} render(); };
+document.getElementById('locateBtn').onclick = locate;
+// On se souvient du choix et du dernier lieu d'une fois sur l'autre
+try {
+  stampPlace.value = localStorage.getItem('x6h-lieu') || '';
+  if (localStorage.getItem('x6h-date-lieu') === '1') { stampOn.checked = true; document.getElementById('stampFields').hidden = false; }
+} catch (_) {}
+stampDate.value = today();
 
 /* =====================================================================
    RECADRAGE : un cadre sur la photo, qu'on déplace au doigt et dont on tire
