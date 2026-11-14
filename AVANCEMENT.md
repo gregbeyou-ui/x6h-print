@@ -69,7 +69,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 - Bouton « ✂️ Recadrer » : ouvre la photo en plein écran avec un cadre. On le déplace au doigt et on tire ses coins. Formats : Libre, Carré, Portrait (3:4), Paysage (4:3). « Tout » = photo entière.
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
-- Testé dans le navigateur du PC (format téléphone), pas encore sur l'iPhone.
+- Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
 ### Photos des invités (v13) : comment ça marche
 
