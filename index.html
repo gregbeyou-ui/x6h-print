@@ -146,9 +146,12 @@ let mode = 'nb';
 const GAMMA_NB = 1.5;       // éclaircit les gris en noir et blanc (l'imprimante les fonce)
 const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gris
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
-const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
+// Mode gris : attente (ms) après chaque paquet de 20 lignes, selon le rythme d'envoi.
+// Trop d'attente = l'imprimante finit son paquet avant de recevoir le suivant, s'arrête,
+// et laisse une ligne blanche tous les 2,5 mm.
+const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v9';
+const VERSION = '14/11 – v10';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -634,6 +637,7 @@ async function print() {
     const delay = baseDelay;
 
     const total = chunks.reduce((s, p) => s + p.length, 0);
+    const t0 = Date.now();
     let sent = 0;
     pauseCount = 0;
     let reconnects = 0;
@@ -655,7 +659,8 @@ async function print() {
         continue;
       }
       // En gris, un paquet perdu fait disparaître 20 lignes : on souffle après chacun
-      if (m.gray && chunks[n][2] === CMD.GRAY) await sleep(GRAY_PACKET_PAUSE);
+      const packetPause = GRAY_PACKET_PAUSES[document.getElementById('sendSpeed').value] ?? 15;
+      if (m.gray && chunks[n][2] === CMD.GRAY && packetPause) await sleep(packetPause);
       sent += chunks[n].length;
       bar.style.width = (100 * sent / total) + '%';
     }
@@ -667,7 +672,8 @@ async function print() {
       (notifOk ? `messages reçus : ${replies}` : 'l\'imprimante ne répond pas') +
       (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
       (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
-      (m.gray ? `, morceaux de ${grayBloc} octets` : '');
+      (m.gray ? `, morceaux de ${grayBloc} octets` : '') +
+      `, rythme : ${document.getElementById('sendSpeed').value}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');

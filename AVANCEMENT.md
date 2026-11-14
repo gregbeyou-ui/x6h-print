@@ -1,6 +1,6 @@
 # Avancement du projet X6h Print
 
-*Mis à jour le 13/11/2026.*
+*Mis à jour le 14/11/2026.*
 
 Objectif : imprimer des photos sur la mini-imprimante thermique Bluetooth **X6h-FC21** sans l'appli Tiny Print, d'abord depuis l'iPhone (page web dans Bluefy), plus tard pour des invités via un relais (PC puis ESP32).
 
@@ -22,6 +22,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 ### Ce qui marche
 
 - **Depuis l'iPhone avec Bluefy (version v5)** : une photo en N&B sort en entier. 🎉
+- **Depuis l'iPhone en mode Gris (version v9)** : la photo sort, mais lentement et avec une ligne blanche tous les 2 à 3 mm (voir plus bas).
 - **Depuis le PC avec Python** : noir et blanc et niveaux de gris impriment correctement.
 - **Depuis Chrome sur le PC** : le noir et blanc imprime une photo complète et propre.
 
@@ -30,6 +31,9 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - La liaison Bluetooth se coupe pendant les moments d'inactivité : la page se reconnecte toute seule à l'impression, et renvoie les réglages de début si la coupure arrive en pleine impression.
 - L'iPhone jette sans prévenir ce qu'on lui envoie trop vite (seuls quelques millimètres sortaient) : les lignes sont regroupées par envois de 177 octets, avec un rythme réglable dans « Réglages avancés → Rythme d'envoi Bluetooth » (**Lent** par défaut sur iPhone).
 - Bluefy et GitHub gardent l'ancienne page en mémoire quelques minutes : le numéro de version est affiché tout en bas de la page.
+- **Mode Gris, rien ne sortait (corrigé en v9)** : un paquet gris (environ 3 850 octets) est découpé en morceaux. La page passait à Bluefy une « fenêtre » sur le gros paquet (`subarray`) ; Bluefy envoyait alors le début du paquet entier au lieu du morceau. Il faut une vraie copie (`slice`). Chrome n'avait pas ce problème.
+- L'imprimante **n'accepte pas** les envois avec accusé de réception (essayé en v7).
+- **Lignes blanches en Gris** : un paquet = 20 lignes = 2,5 mm. Si le paquet suivant arrive trop tard, l'imprimante s'arrête et laisse une ligne blanche. La v10 raccourcit les attentes entre paquets selon le « Rythme d'envoi » ; le message de fin affiche le rythme et la durée.
 
 ### Android
 
@@ -38,16 +42,15 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 ### Pas encore vérifié
 
-- **Mode Gris depuis l'iPhone** : jamais essayé.
 - **Mode Gris depuis Chrome** : des bandes de 20 lignes manquaient au premier essai ; l'envoi a été ralenti et regroupé depuis, pas encore réimprimé.
-- Si le rythme « Normal », plus rapide, suffit aussi sur iPhone.
+- Quel rythme et quelle taille de morceaux font disparaître les lignes blanches en Gris sur iPhone.
 
 ---
 
 ## Prochaine chose à faire
 
-1. Dans Bluefy, imprimer la même photo en mode **Gris** et vérifier qu'elle sort en entier, sans bandes manquantes.
-2. Si elle est coupée ou a des trous : noter le message de fin et la longueur imprimée, et les donner à Claude.
+1. Dans Bluefy (v10), imprimer en Gris avec « Rythme : Normal » et « Morceaux : 177 octets », puis avec « Rythme : Rapide ». Noter pour chacun : photo complète ou non, lignes blanches, durée affichée.
+2. Choisir les réglages par défaut d'après ces essais.
 3. Ensuite : étape 5, le relais pour les invités.
 
 ---
