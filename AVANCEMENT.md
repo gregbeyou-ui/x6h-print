@@ -71,6 +71,22 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Rendu adapté à chaque mode (v21)
+
+- **Mode Gris, nouveau tramage** : l'ancien calcul (repris de Tiny Print, coefficient 0,9 et 14 paliers) envoyait tous les gris clairs vers les niveaux 3 à 5, qui ne marquent pas le papier : environ le cinquième le plus clair de l'image sortait blanc, et les tons moyens étaient trop foncés. Le nouveau calcul n'utilise que les niveaux qui marquent (0, 5 à 13, 15), chacun avec sa noirceur (tableau `DARKNESS` de la page, estimé d'après les mesures de `REGLAGES.md`), et répartit l'écart sur les voisins (Floyd-Steinberg en serpentin).
+- Test sur un dégradé (noirceur moyenne de 8 tranches, du noir au blanc) :
+
+| | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Voulu | 94 % | 81 % | 69 % | 56 % | 44 % | 31 % | 19 % | 6 % |
+| Ancien calcul | 100 % | 93 % | 82 % | 67 % | 45 % | 19 % | 5 % | 0 % |
+| Nouveau calcul | 94 % | 81 % | 69 % | 56 % | 44 % | 31 % | 19 % | 6 % |
+
+- **Amélioration automatique différente selon le mode** :
+  - N&B : extrêmes coupés à 1 %, tons moyens visés à 55 %, netteté forte (0,9) ;
+  - Gris : extrêmes coupés à 0,3 % (détails gardés dans les blancs et les noirs), tons moyens visés à 58 %, netteté faible (0,35), pour ne pas faire ressortir le grain.
+- Pas encore imprimé sur papier. Si le Gris sort trop clair ou trop foncé, c'est le tableau `DARKNESS` qu'il faudra ajuster (mesure d'une mire à l'énergie 6500).
+
 ### Travail gardé dans le téléphone (v20)
 
 - Problème signalé : photos préparées avant de connecter l'imprimante, puis « Connecter l'imprimante » (fenêtre Bluetooth de Bluefy) → tout le travail disparaissait. Rien dans le code ne l'efface : très probablement, l'iPhone **recharge la page** à ce moment-là, surtout quand les photos prennent beaucoup de mémoire.
