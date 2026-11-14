@@ -65,6 +65,12 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Bouton « ↻ Tourner de 90° » : ajoute 90° à chaque appui. Sous l'aperçu, la page indique le sens choisi et la longueur du ticket.
 - Confirmé sur papier depuis l'iPhone le 14/11/2026.
 
+### Recadrage (v15)
+
+- Bouton « ✂️ Recadrer » : ouvre la photo en plein écran avec un cadre. On le déplace au doigt et on tire ses coins. Formats : Libre, Carré, Portrait (3:4), Paysage (4:3). « Tout » = photo entière.
+- Après validation, le sens d'impression est rechoisi d'après le format recadré.
+- Testé dans le navigateur du PC (format téléphone), pas encore sur l'iPhone.
+
 ### Photos des invités (v13) : comment ça marche
 
 - Le bouton **📲 Amis** affiche un QR code vers `envoyer.html#<identifiant>`. L'identifiant est gardé dans le téléphone : le QR code reste le même d'une fois sur l'autre.

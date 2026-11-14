@@ -45,6 +45,25 @@
   .thumb.selected { border-color:var(--accent); }
   .thumb img { width:100%; height:90px; object-fit:cover; display:block; }
   .thumb span { display:block; font-size:12px; padding:3px 5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #cropView { position:fixed; inset:0; z-index:10; background:#111; color:#fff; display:flex; flex-direction:column;
+              padding:max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom)); gap:12px; }
+  .cropTop { font-size:14px; text-align:center; color:#ccc; }
+  .cropRatios button { padding:10px 4px; font-size:14px; }
+  .cropRatios button.secondary { background:#333; color:#fff; }
+  .cropRatios button:not(.secondary) { background:#fff; color:#111; }
+  .cropArea { flex:1; display:flex; align-items:center; justify-content:center; min-height:0; }
+  .cropBox { position:relative; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
+  #cropImg { display:block; max-width:calc(100vw - 32px); max-height:calc(100vh - 240px); pointer-events:none; }
+  .cropRect { position:absolute; border:2px solid #fff; box-shadow:0 0 0 9999px rgba(0,0,0,.6); cursor:move; }
+  .cropRect i { position:absolute; width:28px; height:28px; border:4px solid #fff; }
+  .cropRect .nw { left:0; top:0; border-right:0; border-bottom:0; cursor:nwse-resize; }
+  .cropRect .ne { right:0; top:0; border-left:0; border-bottom:0; cursor:nesw-resize; }
+  .cropRect .sw { left:0; bottom:0; border-right:0; border-top:0; cursor:nesw-resize; }
+  .cropRect .se { right:0; bottom:0; border-left:0; border-top:0; cursor:nwse-resize; }
+  /* zone de prise plus grande que le dessin du coin, pour le doigt */
+  .cropRect i::after { content:''; position:absolute; inset:-14px; }
+  .cropActions button.secondary { background:#333; color:#fff; }
+  .cropActions button:not(.secondary) { background:#fff; color:#111; }
   .thumb b { position:absolute; top:4px; right:4px; background:var(--ok); color:#fff; font-size:11px; padding:2px 6px; border-radius:8px; }
 </style>
 </head>
@@ -82,7 +101,10 @@
       <canvas id="canvas" hidden></canvas>
       <span class="empty" id="emptyMsg">Aucune photo choisie</span>
     </div>
-    <button class="secondary" id="rotateBtn" style="margin-top:10px" disabled>↻ Tourner de 90°</button>
+    <div class="row" style="margin-top:10px">
+      <button class="secondary" id="cropBtn" disabled>✂️ Recadrer</button>
+      <button class="secondary" id="rotateBtn" disabled>↻ Tourner de 90°</button>
+    </div>
     <div class="hint" id="orientHint" style="text-align:center"></div>
 
     <label>Luminosité <span id="brightVal">0</span></label>
@@ -131,6 +153,30 @@
   </div>
   <div class="hint" id="version" style="text-align:center"></div>
 </main>
+
+<!-- Fenêtre de recadrage : on déplace le cadre, on tire ses coins -->
+<div id="cropView" hidden>
+  <div class="cropTop">Fais glisser le cadre, tire ses coins pour le redimensionner.</div>
+  <div class="row cropRatios" id="cropRatios">
+    <button data-ratio="0">Libre</button>
+    <button class="secondary" data-ratio="1">Carré</button>
+    <button class="secondary" data-ratio="0.75">Portrait</button>
+    <button class="secondary" data-ratio="1.3333">Paysage</button>
+  </div>
+  <div class="cropArea">
+    <div class="cropBox" id="cropBox">
+      <img id="cropImg" alt="">
+      <div class="cropRect" id="cropRect">
+        <i class="nw"></i><i class="ne"></i><i class="sw"></i><i class="se"></i>
+      </div>
+    </div>
+  </div>
+  <div class="row cropActions">
+    <button class="secondary" id="cropCancel">Annuler</button>
+    <button class="secondary" id="cropAll">Tout</button>
+    <button id="cropOk">Valider</button>
+  </div>
+</div>
 
 <script>
 /* =====================================================================
@@ -181,7 +227,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v14';
+const VERSION = '14/11 – v15';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -485,22 +531,28 @@ function toLevels(gray, w, h) {
    Le bouton « Tourner » ajoute 90° à chaque appui. */
 let rotation = 0;   // 0, 90, 180 ou 270 degrés (sens des aiguilles d'une montre)
 
-function autoRotation(img) { return img.width > img.height ? 90 : 0; }
+let crop = null;     // partie gardée de la photo { x, y, w, h } en pixels, ou null = toute la photo
+
+// Partie de la photo utilisée (après recadrage)
+function srcRect() {
+  return crop || { x: 0, y: 0, w: sourceImg.naturalWidth, h: sourceImg.naturalHeight };
+}
+function autoRotation() { const r = srcRect(); return r.w > r.h ? 90 : 0; }
 
 function loadFile(file) {
   if (!file) return;
   const img = new Image();
-  img.onload = () => { sourceImg = img; rotation = autoRotation(img); render(); };
+  img.onload = () => { sourceImg = img; crop = null; rotation = autoRotation(); render(); };
   img.src = URL.createObjectURL(file);
 }
 
 function showOrientation() {
   const el = document.getElementById('orientHint');
   if (!sourceImg) { el.textContent = ''; return; }
-  const kind = sourceImg.width > sourceImg.height ? 'Photo en largeur (paysage)'
-             : sourceImg.width < sourceImg.height ? 'Photo en hauteur (portrait)' : 'Photo carrée';
-  const auto = rotation === autoRotation(sourceImg) ? ' (choix automatique)' : '';
-  el.textContent = `${kind} : tournée de ${rotation}°${auto}, ticket de ${Math.round(height / 8)} mm.`;
+  const r = srcRect();
+  const kind = r.w > r.h ? 'Photo en largeur (paysage)' : r.w < r.h ? 'Photo en hauteur (portrait)' : 'Photo carrée';
+  const auto = rotation === autoRotation() ? ' (choix automatique)' : '';
+  el.textContent = `${crop ? 'Recadrée. ' : ''}${kind} : tournée de ${rotation}°${auto}, ticket de ${Math.round(height / 8)} mm.`;
 }
 
 function render() {
@@ -511,20 +563,21 @@ function render() {
 
   // 1) On compose photo + texte dans le sens de la photo.
   //    Droite : la largeur fait 384 points. Tournée : c'est la hauteur qui fait 384 points.
+  const src = srcRect();
   const comp = document.createElement('canvas');
   let imgW, imgH;
   if (turned) {
     imgH = WIDTH - textH;
-    imgW = Math.round(sourceImg.width * imgH / sourceImg.height);
+    imgW = Math.round(src.w * imgH / src.h);
     comp.width = imgW; comp.height = WIDTH;
   } else {
     imgW = WIDTH;
-    imgH = Math.round(sourceImg.height * WIDTH / sourceImg.width);
+    imgH = Math.round(src.h * WIDTH / src.w);
     comp.width = WIDTH; comp.height = imgH + textH;
   }
   const c2 = comp.getContext('2d');
   c2.fillStyle = '#fff'; c2.fillRect(0, 0, comp.width, comp.height);
-  c2.drawImage(sourceImg, 0, 0, imgW, imgH);
+  c2.drawImage(sourceImg, src.x, src.y, src.w, src.h, 0, 0, imgW, imgH);
   if (caption) {
     c2.fillStyle = '#000'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
     c2.font = 'bold 26px -apple-system, system-ui, sans-serif';
@@ -766,6 +819,101 @@ async function feed() {
 }
 
 /* =====================================================================
+   RECADRAGE : un cadre sur la photo, qu'on déplace au doigt et dont on tire
+   les coins. Les calculs se font en points d'écran, puis on convertit en
+   pixels de la photo au moment de valider.
+   ===================================================================== */
+const cropView = document.getElementById('cropView');
+const cropImg = document.getElementById('cropImg');
+const cropRectEl = document.getElementById('cropRect');
+const CROP_MIN = 40;          // taille minimale du cadre, en points d'écran
+let cr = null;                // cadre en cours { x, y, w, h } en points d'écran
+let cropRatio = 0;            // 0 = libre, sinon largeur / hauteur imposée
+let drag = null;              // geste en cours
+
+function cropBounds() { return { W: cropImg.clientWidth, H: cropImg.clientHeight }; }
+function drawCropRect() {
+  Object.assign(cropRectEl.style, { left: cr.x + 'px', top: cr.y + 'px', width: cr.w + 'px', height: cr.h + 'px' });
+}
+
+// Le plus grand cadre centré qui respecte le format choisi
+function fullCropRect() {
+  const { W, H } = cropBounds();
+  if (!cropRatio) return { x: 0, y: 0, w: W, h: H };
+  let w = W, h = W / cropRatio;
+  if (h > H) { h = H; w = H * cropRatio; }
+  return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+
+function openCrop() {
+  if (!sourceImg) return;
+  cropView.hidden = false;
+  cropImg.onload = () => {
+    const k = cropImg.clientWidth / sourceImg.naturalWidth;   // pixels photo → points d'écran
+    cr = crop ? { x: crop.x * k, y: crop.y * k, w: crop.w * k, h: crop.h * k } : fullCropRect();
+    drawCropRect();
+  };
+  if (cropImg.src === sourceImg.src && cropImg.complete) cropImg.onload();
+  else cropImg.src = sourceImg.src;
+}
+
+function setCropRatio(r) {
+  cropRatio = r;
+  for (const b of document.querySelectorAll('#cropRatios button'))
+    b.className = +b.dataset.ratio === r ? '' : 'secondary';
+  cr = fullCropRect(); drawCropRect();
+}
+
+cropRectEl.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  cropRectEl.setPointerCapture(e.pointerId);
+  const corner = e.target.tagName === 'I' ? e.target.className : 'move';
+  drag = { corner, px: e.clientX, py: e.clientY, s: { ...cr } };
+});
+cropRectEl.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const { W, H } = cropBounds();
+  const dx = e.clientX - drag.px, dy = e.clientY - drag.py, s = drag.s;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  if (drag.corner === 'move') {
+    cr = { ...s, x: clamp(s.x + dx, 0, W - s.w), y: clamp(s.y + dy, 0, H - s.h) };
+  } else {
+    const left = drag.corner.includes('w'), top = drag.corner.includes('n');
+    // Le coin opposé ne bouge pas
+    const ax = left ? s.x + s.w : s.x, ay = top ? s.y + s.h : s.y;
+    const px = (left ? s.x : s.x + s.w) + dx, py = (top ? s.y : s.y + s.h) + dy;
+    const maxW = left ? ax : W - ax, maxH = top ? ay : H - ay;
+    let w = clamp(left ? ax - px : px - ax, CROP_MIN, maxW);
+    let h = clamp(top ? ay - py : py - ay, CROP_MIN, maxH);
+    if (cropRatio) {
+      h = w / cropRatio;
+      if (h > maxH) { h = maxH; w = h * cropRatio; }
+    }
+    cr = { x: left ? ax - w : ax, y: top ? ay - h : ay, w, h };
+  }
+  drawCropRect();
+});
+const endDrag = () => { drag = null; };
+cropRectEl.addEventListener('pointerup', endDrag);
+cropRectEl.addEventListener('pointercancel', endDrag);
+
+for (const b of document.querySelectorAll('#cropRatios button')) b.onclick = () => setCropRatio(+b.dataset.ratio);
+document.getElementById('cropAll').onclick = () => setCropRatio(0);
+document.getElementById('cropCancel').onclick = () => { cropView.hidden = true; };
+document.getElementById('cropOk').onclick = () => {
+  const k = sourceImg.naturalWidth / cropImg.clientWidth;   // points d'écran → pixels photo
+  const c = { x: Math.round(cr.x * k), y: Math.round(cr.y * k), w: Math.round(cr.w * k), h: Math.round(cr.h * k) };
+  c.w = Math.min(c.w, sourceImg.naturalWidth - c.x); c.h = Math.min(c.h, sourceImg.naturalHeight - c.y);
+  // Presque toute la photo : on considère qu'il n'y a pas de recadrage
+  const whole = c.w >= sourceImg.naturalWidth * 0.99 && c.h >= sourceImg.naturalHeight * 0.99;
+  crop = whole ? null : c;
+  rotation = autoRotation();     // le format a pu changer : on rechoisit le sens
+  cropView.hidden = true;
+  render();
+};
+document.getElementById('cropBtn').onclick = openCrop;
+
+/* =====================================================================
    PHOTOS DES AMIS : un QR code mène à envoyer.html, qui se relie directement
    à ce téléphone (WebRTC, via la bibliothèque PeerJS et son serveur de mise
    en relation gratuit). Les photos arrivent ici sans passer par un serveur à nous.
@@ -902,6 +1050,7 @@ function updateButtons() {
   document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing;
   document.getElementById('feedBtn').disabled  = !device || printing;
   document.getElementById('rotateBtn').disabled = !sourceImg || printing;
+  document.getElementById('cropBtn').disabled = !sourceImg || printing;
   document.getElementById('connectBtn').textContent = device ? 'Changer d\'imprimante' : 'Connecter l\'imprimante';
 }
 
