@@ -18,6 +18,7 @@ Une page web pour imprimer des photos sur une mini-imprimante thermique Bluetoot
    - **✂️ Recadrer** : un cadre à déplacer au doigt, coins à tirer, formats Libre / Carré / Portrait / Paysage. « Tout » revient à la photo entière.
    - **📍 Date et lieu** : petite ligne en bas du ticket. La date du jour est remplie toute seule ; le lieu vient de la localisation de l'appareil (nom de la ville trouvé par OpenStreetMap). Les deux se modifient à la main.
    - **Sens d'impression automatique** : une photo en hauteur est imprimée droite, une photo en largeur est tournée de 90° pour s'étaler dans la longueur du papier (image plus grande). Le bouton **↻ Tourner de 90°** change le sens à la main.
+   - **Travail gardé** : photos (seule, série, amis) et réglages sont gardés dans le téléphone. Si la page se recharge (par exemple en connectant l'imprimante après avoir préparé les photos), tout revient. On peut donc préparer les photos avant de connecter l'imprimante.
 4. Choisir le mode, puis **Imprimer** :
    - **N&B** : noir profond, texte net, rendu granuleux ;
    - **Gris** : 16 niveaux de gris, dégradés lisses, plus lent.

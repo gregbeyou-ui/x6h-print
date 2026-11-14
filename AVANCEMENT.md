@@ -71,6 +71,15 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Après validation, le sens d'impression est rechoisi d'après le format recadré.
 - Confirmé au doigt sur l'iPhone (Bluefy) le 14/11/2026.
 
+### Travail gardé dans le téléphone (v20)
+
+- Problème signalé : photos préparées avant de connecter l'imprimante, puis « Connecter l'imprimante » (fenêtre Bluetooth de Bluefy) → tout le travail disparaissait. Rien dans le code ne l'efface : très probablement, l'iPhone **recharge la page** à ce moment-là, surtout quand les photos prennent beaucoup de mémoire.
+- Correction, en deux parties :
+  1. Les photos sont réduites dès l'ouverture à 1600 points au plus (JPEG) au lieu de 12 millions de points : beaucoup moins de mémoire, donc moins de rechargements.
+  2. Photos (seule, série, amis) et réglages (recadrage, sens, série, texte, luminosité, contraste, amélioration, mode) sont gardés dans le navigateur (IndexedDB) à chaque changement, et rechargés à l'ouverture de la page. Message « Ton travail a été retrouvé ✓ ». Les photos qui ne servent plus sont effacées.
+- Bouton « 🗑️ Effacer les photos reçues » dans le panneau Amis (sinon elles restent d'une soirée à l'autre). Le bouton Amis affiche le nombre de photos reçues.
+- Testé sur le PC (rechargement de la page), pas encore sur l'iPhone.
+
 ### Plusieurs photos et amélioration automatique (v17)
 
 - **Série** : la Galerie accepte plusieurs photos. Elles s'affichent en vignettes ; chacune garde son recadrage et son sens.

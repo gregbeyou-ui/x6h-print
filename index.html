@@ -99,6 +99,7 @@
       <button class="secondary" id="shareBtn" hidden>Envoyer le lien par message</button>
       <div class="hint">Les amis scannent le QR code avec l'appareil photo de leur téléphone, puis envoient leurs photos. Garde cette page ouverte à l'écran pendant ce temps. Touche une photo reçue pour la préparer.</div>
       <div class="thumbs" id="guestList"></div>
+      <button class="secondary small" id="clearGuestsBtn" hidden>🗑️ Effacer les photos reçues</button>
     </div>
     <div class="preview" style="margin-top:12px">
       <canvas id="canvas" hidden></canvas>
@@ -248,7 +249,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v19';
+const VERSION = '14/11 – v20';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -605,16 +606,47 @@ function srcRect() {
 }
 function autoRotation() { const r = srcRect(); return r.w > r.h ? 90 : 0; }
 
-// Charge une photo. opts = { crop, rotation } pour retrouver les réglages d'une photo
-// de la série. Renvoie une promesse tenue quand l'aperçu est prêt.
-function loadFile(file, opts = null) {
+/* Les photos de l'iPhone sont énormes (12 millions de points) alors que l'imprimante
+   n'en a que 384 de large. On les réduit dès l'ouverture à 1600 points au plus :
+   beaucoup moins de mémoire (l'iPhone recharge la page quand elle en prend trop),
+   et on peut les garder dans le téléphone. Renvoie un Blob JPEG. */
+const KEEP_MAX = 1600;
+async function shrinkPhoto(file) {
+  const img = await loadImage(file);
+  if (!img) return null;
+  const big = Math.max(img.naturalWidth, img.naturalHeight);
+  if (big <= KEEP_MAX && file.type === 'image/jpeg') { URL.revokeObjectURL(img.src); return file; }
+  const k = Math.min(1, KEEP_MAX / big);
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(img.src);
+  return new Promise(ok => c.toBlob(b => ok(b), 'image/jpeg', 0.9));
+}
+
+// Photo seule choisie avec « Photo » ou « Galerie » : { id, blob }
+let singlePhoto = null;
+async function loadFile(file) {
+  if (!file) return;
+  setStatus('Préparation de la photo…');
+  const blob = await shrinkPhoto(file);
+  if (!blob) { setStatus('Cette photo ne peut pas être lue.', 'err'); return; }
+  singlePhoto = { id: newPhotoId(), blob };
+  savePhoto(singlePhoto.id, blob);
+  setStatus(device ? 'Prête à imprimer ✓' : 'Photo prête. Connecte l\'imprimante pour imprimer.');
+  return showImage(blob);
+}
+
+// Affiche une photo. opts = { crop, rotation } pour retrouver ses réglages.
+// Renvoie une promesse tenue quand l'aperçu est prêt.
+function showImage(file, opts = null) {
   if (!file) return Promise.resolve();
   return new Promise(ok => {
     const img = new Image();
     img.onload = () => {
       sourceImg = img;
       crop = opts ? opts.crop : null;
-      rotation = opts && opts.rotation !== null ? opts.rotation : autoRotation();
+      rotation = opts && opts.rotation != null ? opts.rotation : autoRotation();
       render(); ok();
     };
     img.onerror = () => { setStatus('Cette photo ne peut pas être lue.', 'err'); ok(); };
@@ -839,6 +871,131 @@ function finishRender(photoH, regions, stamp, stampH) {
   canvas.hidden = false;
   document.getElementById('emptyMsg').hidden = true;
   updateButtons();
+  scheduleSave();   // chaque changement est gardé dans le téléphone
+}
+
+/* =====================================================================
+   SAUVEGARDE DANS LE TÉLÉPHONE : photos (série, amis, photo seule) et
+   réglages (recadrage, sens, texte, luminosité…) sont gardés dans le
+   navigateur (IndexedDB). Si la page se recharge (par exemple quand
+   l'iPhone ouvre la fenêtre Bluetooth pour connecter l'imprimante), tout
+   revient tel quel.
+   ===================================================================== */
+const store = (() => {
+  let dbp = null;
+  function open() {
+    if (!dbp) dbp = new Promise((ok, ko) => {
+      const r = indexedDB.open('x6h-print', 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore('photos'); r.result.createObjectStore('etat'); };
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => ko(r.error);
+    });
+    return dbp;
+  }
+  async function run(name, mode, fn) {
+    const db = await open();
+    return new Promise((ok, ko) => {
+      const t = db.transaction(name, mode);
+      const req = fn(t.objectStore(name));
+      t.oncomplete = () => ok(req && req.result);
+      t.onerror = () => ko(t.error);
+      t.onabort = () => ko(t.error);
+    });
+  }
+  return {
+    put: (name, key, val) => run(name, 'readwrite', s => s.put(val, key)),
+    get: (name, key) => run(name, 'readonly', s => s.get(key)),
+    del: (name, key) => run(name, 'readwrite', s => s.delete(key)),
+    keys: name => run(name, 'readonly', s => s.getAllKeys()),
+  };
+})();
+
+function newPhotoId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+// Photo gardée en octets bruts (ce que tous les navigateurs savent garder)
+async function savePhoto(id, blob) {
+  try { await store.put('photos', id, { buf: await blob.arrayBuffer(), type: blob.type || 'image/jpeg' }); }
+  catch (e) { console.warn('Photo non sauvegardée', e); }
+}
+async function readPhoto(id) {
+  try { const p = await store.get('photos', id); return p ? new Blob([p.buf], { type: p.type }) : null; }
+  catch (_) { return null; }
+}
+
+let saveReady = false;   // pas de sauvegarde tant que le travail précédent n'est pas rechargé
+let saveTimer = null;
+function scheduleSave() {
+  if (!saveReady) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 400);
+}
+
+async function saveState() {
+  const kind = currentGuest ? 'guest' : isSeries() ? 'batch' : (singlePhoto && sourceImg) ? 'single' : null;
+  const st = {
+    mode,
+    caption: document.getElementById('caption').value,
+    bright: document.getElementById('bright').value,
+    contrast: document.getElementById('contrast').value,
+    autoEnhance: document.getElementById('autoEnhance').checked,
+    kind,
+    crop: kind === 'single' || kind === 'guest' ? crop : null,
+    rotation: kind === 'single' || kind === 'guest' ? rotation : null,
+    single: kind === 'single' ? singlePhoto.id : null,
+    batch: batch.map(b => ({ id: b.id, crop: b.crop, rotation: b.rotation })),
+    batchIndex: batch.indexOf(currentBatch),
+    seriesRotation,
+    guests: guestPhotos.map(g => ({ id: g.id, from: g.from, printed: g.printed })),
+    guestIndex: guestPhotos.indexOf(currentGuest),
+  };
+  try {
+    await store.put('etat', 'travail', st);
+    // On efface les photos qui ne servent plus
+    const used = new Set([st.single, ...st.batch.map(b => b.id), ...st.guests.map(g => g.id)]);
+    for (const k of await store.keys('photos')) if (!used.has(k)) await store.del('photos', k);
+  } catch (e) { console.warn('Sauvegarde impossible', e); }
+}
+
+async function restoreState() {
+  let st = null;
+  try { st = await store.get('etat', 'travail'); } catch (_) {}
+  try {
+    if (!st) return;
+    document.getElementById('caption').value = st.caption || '';
+    for (const id of ['bright', 'contrast']) {
+      document.getElementById(id).value = st[id] ?? 0;
+      document.getElementById(id + 'Val').textContent = document.getElementById(id).value;
+    }
+    document.getElementById('autoEnhance').checked = st.autoEnhance !== false;
+    // Photos des amis
+    for (const g of st.guests || []) {
+      const blob = await readPhoto(g.id);
+      if (blob) guestPhotos.push({ id: g.id, blob, url: URL.createObjectURL(blob), from: g.from, printed: g.printed });
+    }
+    // Série
+    for (const b of st.batch || []) {
+      const blob = await readPhoto(b.id);
+      const img = blob && await loadImage(blob);
+      if (img) batch.push({ id: b.id, blob, img, url: img.src, crop: b.crop, rotation: b.rotation ?? autoRotationOf(img, b.crop) });
+    }
+    seriesRotation = st.seriesRotation ?? null;
+    if (MODES[st.mode]) setMode(st.mode);
+    // Photo en cours
+    if (st.kind === 'batch' && batch.length >= 2) chooseBatch(batch[st.batchIndex] || batch[0]);
+    else if (st.kind === 'guest' && guestPhotos[st.guestIndex])
+      await chooseGuest(guestPhotos[st.guestIndex], { crop: st.crop, rotation: st.rotation });
+    else if (st.kind === 'single' && st.single) {
+      const blob = await readPhoto(st.single);
+      if (blob) { singlePhoto = { id: st.single, blob }; await showImage(blob, { crop: st.crop, rotation: st.rotation }); }
+    }
+    renderBatch(); renderGuests();
+    if (sourceImg || guestPhotos.length)
+      setStatus('Ton travail a été retrouvé ✓ Connecte l\'imprimante pour imprimer.', 'ok');
+  } catch (e) {
+    console.warn('Restauration incomplète', e);
+  } finally {
+    saveReady = true;
+  }
 }
 
 // Transforme une ligne de 384 points en 48 octets.
@@ -1013,7 +1170,7 @@ async function print() {
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
     ok = !problem;
-    if (currentGuest) { currentGuest.printed = true; renderGuests(); }
+    if (currentGuest) { currentGuest.printed = true; renderGuests(); scheduleSave(); }
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
   }
@@ -1221,13 +1378,25 @@ function autoRotationOf(img, cr) {
 async function setBatch(files) {
   for (const b of batch) URL.revokeObjectURL(b.url);
   batch = []; currentBatch = null; seriesRotation = null;
-  if (files.length) setStatus(`Chargement des ${files.length} photos…`);
-  const imgs = await Promise.all(files.map(loadImage));
-  batch = imgs.filter(Boolean).map(img => ({ img, url: img.src, crop: null, rotation: autoRotationOf(img, null) }));
-  if (files.length) setStatus(device ? 'Prête à imprimer ✓' : 'Non connectée');
-  if (batch.length === 1) { const b = batch[0]; batch = []; sourceImg = b.img; crop = null; rotation = b.rotation; render(); }
-  else if (batch.length) chooseBatch(batch[0]);
+  if (!files.length) { renderBatch(); scheduleSave(); return; }
+  setStatus(`Préparation des ${files.length} photos…`);
+  const items = [];
+  for (const f of files) {                       // une par une : moins de mémoire d'un coup
+    const blob = await shrinkPhoto(f);
+    const img = blob && await loadImage(blob);
+    if (!img) continue;
+    const id = newPhotoId();
+    savePhoto(id, blob);
+    items.push({ id, blob, img, url: img.src, crop: null, rotation: autoRotationOf(img, null) });
+  }
+  batch = items;
+  setStatus(device ? 'Prête à imprimer ✓' : 'Photos prêtes. Connecte l\'imprimante pour imprimer.');
+  if (batch.length === 1) {
+    singlePhoto = { id: batch[0].id, blob: batch[0].blob }; batch = [];
+    await showImage(singlePhoto.blob);
+  } else if (batch.length) chooseBatch(batch[0]);
   renderBatch();
+  scheduleSave();
 }
 
 // Photo de la série à régler (recadrer, tourner) : l'aperçu montre toujours tout le ticket
@@ -1347,23 +1516,27 @@ async function startGuests(renew = false) {
 }
 
 function addGuestPhoto(blob, from) {
-  const g = { blob, url: URL.createObjectURL(blob), from, printed: false };
+  const g = { id: newPhotoId(), blob, url: URL.createObjectURL(blob), from, printed: false };
+  savePhoto(g.id, blob);
   guestPhotos.unshift(g);                         // la plus récente en premier
   if (!sourceImg) chooseGuest(g);                 // aucune photo choisie : on prépare celle-ci
   renderGuests();
+  scheduleSave();
   if (navigator.vibrate) navigator.vibrate(100);
 }
 
-function chooseGuest(g) {
+function chooseGuest(g, opts = null) {
   currentGuest = g;
   currentBatch = null; renderBatch();
-  loadFile(g.blob);
   renderGuests();
+  return showImage(g.blob, opts);
 }
 
 function renderGuests() {
   const list = document.getElementById('guestList');
   list.innerHTML = '';
+  document.getElementById('guestBtn').textContent = guestPhotos.length ? `📲 Amis (${guestPhotos.length})` : '📲 Amis';
+  document.getElementById('clearGuestsBtn').hidden = !guestPhotos.length;
   for (const g of guestPhotos) {
     const d = document.createElement('div');
     d.className = 'thumb' + (g === currentGuest ? ' selected' : '');
@@ -1380,6 +1553,15 @@ document.getElementById('guestBtn').onclick = () => {
   const panel = document.getElementById('guestPanel');
   panel.hidden = !panel.hidden;
   if (!panel.hidden && (!hostPeer || hostPeer.destroyed)) startGuests();
+};
+document.getElementById('clearGuestsBtn').onclick = () => {
+  if (!confirm(`Effacer les ${guestPhotos.length} photos reçues ?`)) return;
+  for (const g of guestPhotos) URL.revokeObjectURL(g.url);
+  guestPhotos = [];
+  if (currentGuest) { currentGuest = null; sourceImg = null; bits = levels = null; canvas.hidden = true;
+    document.getElementById('emptyMsg').hidden = false; document.getElementById('orientHint').textContent = ''; updateButtons(); }
+  renderGuests();
+  scheduleSave();
 };
 document.getElementById('shareBtn').onclick = async () => {
   const url = guestLink(hostId());
@@ -1432,9 +1614,9 @@ for (const id of ['bright', 'contrast', 'energy', 'speed']) {
   const el = document.getElementById(id), out = document.getElementById(id + 'Val');
   const show = () => { if (out) out.textContent = el.value; };
   show();
-  el.oninput = () => { show(); if (id === 'bright' || id === 'contrast') render(); };
+  el.oninput = () => { show(); if (id === 'bright' || id === 'contrast') { render(); scheduleSave(); } };
 }
-document.getElementById('caption').oninput = render;
+document.getElementById('caption').oninput = () => { render(); scheduleSave(); };
 
 /* Choix du mode : chaque mode a sa propre énergie et sa propre vitesse (voir MODES en haut) */
 function setMode(m) {
@@ -1455,6 +1637,7 @@ for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => 
 setMode('nb');
 document.getElementById('grayBloc').value = IS_IOS ? '100' : '177';
 document.getElementById('version').textContent = 'Version ' + VERSION;
+restoreState();   // on retrouve le travail d'avant (photos, recadrages, texte…)
 </script>
 </body>
 </html>
