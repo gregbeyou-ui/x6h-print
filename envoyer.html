@@ -29,6 +29,9 @@
   .look .check { display:flex; align-items:center; gap:8px; font-size:14px; margin:0; flex:1; }
   .look .check input { width:22px; height:22px; margin:0; }
   .look button.small { width:auto; padding:8px 12px; font-size:14px; background:#e8e6e0; color:var(--ink); }
+  .modes { display:flex; gap:10px; margin-top:4px; }
+  .modes button { flex:1; padding:12px 6px; font-size:15px; }
+  .modes button.secondary { background:#e8e6e0; color:var(--ink); }
   .modeLabel { text-align:center; color:var(--muted); font-size:13px; margin-top:-4px; }
   .empty { color:var(--muted); font-size:14px; }
   #status { font-size:14px; color:var(--muted); margin-top:10px; text-align:center; line-height:1.4; }
@@ -52,6 +55,10 @@
     <div class="modeLabel" id="modeLabel" hidden></div>
     <!-- Réglages de la photo : l'aperçu montre exactement le ticket -->
     <div class="look" id="lookBox" hidden>
+      <div class="modes" id="modeRow">
+        <button data-mode="nb">⚡ Noir et blanc</button>
+        <button data-mode="gris" class="secondary">✨ Gris</button>
+      </div>
       <label>☀️ Luminosité <span id="brightVal">0</span></label>
       <input type="range" id="bright" min="-100" max="100" value="0">
       <label>◐ Contraste <span id="contrastVal">0</span></label>
@@ -107,7 +114,7 @@ function openConn() {
   conn.on('open', () => { ready = true; updateBtn(); setStatus('Connecté ✓ Choisis une photo puis touche Envoyer.', 'ok'); });
   conn.on('data', d => {
     // Réglages de l'imprimante (N&B ou Gris) : l'aperçu se met dans le même mode
-    if (d && d.type === 'reglages') { if (d.mode) { hostMode = d.mode; renderPreview(); } return; }
+    if (d && d.type === 'reglages') { if (d.mode) { hostMode = d.mode; showModeButtons(); renderPreview(); } return; }
     // Mode borne : le téléphone (ou l'ordinateur) de l'imprimante dit où en est la photo
     if (d && d.type === 'etat') {
       if (d.etat === 'file') setStatus('Photo reçue ✓ Elle va être imprimée…', 'ok');
@@ -157,11 +164,22 @@ function shrink(file) {
    dans le mode choisi là-bas (N&B ou Gris), à la taille réelle d'impression
    (384 points sur le petit côté, puisqu'une photo en largeur est imprimée tournée). */
 let photoImg = null;
-let hostMode = 'nb';        // mode de l'imprimante, envoyé par sa page à la connexion
+let hostMode = 'nb';        // mode choisi sur la page de l'imprimante (envoyé à la connexion)
+let myMode = null;          // mode choisi ici par l'ami (null = celui de l'imprimante)
 const MODE_NAMES = { nb: 'noir et blanc', gris: 'niveaux de gris' };
+function modeNow() { return myMode || hostMode; }
+
+function showModeButtons() {
+  for (const b of document.querySelectorAll('#modeRow button'))
+    b.className = b.dataset.mode === modeNow() ? '' : 'secondary';
+}
+for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => {
+  myMode = b.dataset.mode; showModeButtons(); renderPreview(); saveLook();
+};
 
 function lookNow() {
   return {
+    mode: modeNow(),
     bright: +document.getElementById('bright').value,
     contrast: +document.getElementById('contrast').value,
     auto: document.getElementById('autoEnhance').checked,
@@ -185,13 +203,13 @@ function renderPreview() {
     const d = g.getImageData(0, 0, w, h), px = d.data;
     const gray = new Float32Array(w * h);
     for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
-    const out = processPhoto(gray, w, h, hostMode === 'gris', lookNow());
+    const out = processPhoto(gray, w, h, modeNow() === 'gris', lookNow());
     for (let i = 0; i < out.length; i++) { px[i*4] = px[i*4+1] = px[i*4+2] = out[i]; px[i*4+3] = 255; }
     g.putImageData(d, 0, 0);
     c.hidden = false;
     document.getElementById('emptyMsg').hidden = true;
     const ml = document.getElementById('modeLabel');
-    ml.hidden = false; ml.textContent = `Aperçu du ticket (${MODE_NAMES[hostMode] || hostMode})`;
+    ml.hidden = false; ml.textContent = `Aperçu du ticket (${MODE_NAMES[modeNow()] || modeNow()})`;
   });
 }
 
@@ -216,9 +234,12 @@ try {
     document.getElementById('bright').value = l.bright; document.getElementById('brightVal').textContent = l.bright;
     document.getElementById('contrast').value = l.contrast; document.getElementById('contrastVal').textContent = l.contrast;
     document.getElementById('autoEnhance').checked = l.auto !== false;
+    if (l.mode === 'nb' || l.mode === 'gris') myMode = l.mode;
     showReset();
   }
 } catch (_) {}
+
+showModeButtons();
 
 document.getElementById('fileInput').onchange = async e => {
   const f = e.target.files[0];

@@ -78,6 +78,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 - Quand on change de mode (N&B ou Gris) sur la page de l'imprimante, l'aperçu des amis connectés change aussi.
 - Le traitement d'image (correction auto, tramages, tableau des teintes) est maintenant dans `traitement.js`, partagé par les deux pages.
 - Testé sur le PC avec deux onglets, pas encore avec de vrais téléphones.
+- **v25** : l'ami choisit aussi **Noir et blanc** ou **Gris**. Par défaut, sa page suit le mode de l'imprimante ; dès qu'il choisit, c'est son choix qui compte (gardé sur son téléphone). Côté imprimante (et borne), choisir sa photo passe la page dans son mode, avec ses réglages.
 
 ### Écran simplifié (v23)
 

@@ -296,7 +296,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v24';
+const VERSION = '14/11 – v25';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -1564,14 +1564,16 @@ function broadcastMode() {
 function cleanLook(l) {
   if (!l || typeof l !== 'object') return null;
   const n = v => Math.max(-100, Math.min(100, Math.round(+v || 0)));
-  return { bright: n(l.bright), contrast: n(l.contrast), auto: l.auto !== false };
+  return { bright: n(l.bright), contrast: n(l.contrast), auto: l.auto !== false,
+           mode: MODES[l.mode] ? l.mode : null };
 }
 function currentLook() {
   return { bright: +document.getElementById('bright').value, contrast: +document.getElementById('contrast').value,
-           auto: document.getElementById('autoEnhance').checked };
+           auto: document.getElementById('autoEnhance').checked, mode };
 }
 function applyLookToSliders(l) {
   if (!l) return;
+  if (l.mode && l.mode !== mode) setMode(l.mode, false);   // le mode choisi par l'ami (N&B ou Gris)
   for (const id of ['bright', 'contrast']) {
     document.getElementById(id).value = l[id];
     document.getElementById(id + 'Val').textContent = l[id];
@@ -1794,7 +1796,8 @@ for (const id of ['bright', 'contrast', 'energy', 'speed']) {
 document.getElementById('caption').oninput = () => { render(); scheduleSave(); };
 
 /* Choix du mode : chaque mode a sa propre énergie et sa propre vitesse (voir MODES en haut) */
-function setMode(m) {
+// redraw = false : on change seulement les réglages (l'aperçu sera redessiné juste après)
+function setMode(m, redraw = true) {
   mode = m;
   document.getElementById('energy').value = MODES[m].energy;
   document.getElementById('speed').value = printerToSliderSpeed(MODES[m].speed);
@@ -1806,8 +1809,10 @@ function setMode(m) {
   document.getElementById('modeHint').textContent = MODES[m].hint;
   for (const b of document.querySelectorAll('#modeRow button'))
     b.className = b.dataset.mode === m ? '' : 'secondary';
-  render();   // l'aperçu dépend du mode
-  broadcastMode();   // l'aperçu des amis aussi
+  if (redraw) render();   // l'aperçu dépend du mode
+  // Les amis suivent le mode d'ici, sauf s'ils en ont choisi un eux-mêmes.
+  // (Pas quand c'est la photo d'un ami qui impose son mode.)
+  if (redraw) broadcastMode();
 }
 for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => setMode(b.dataset.mode);
 setMode('nb');
