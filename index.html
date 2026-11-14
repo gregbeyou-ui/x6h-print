@@ -88,6 +88,13 @@
         <option value="normal">Normal</option>
         <option value="lent">Lent (iPhone, si l'impression s'arrête trop tôt)</option>
       </select>
+      <label>Taille des morceaux (mode Gris)</label>
+      <select id="grayBloc">
+        <option value="177">177 octets (PC)</option>
+        <option value="160">160 octets</option>
+        <option value="100">100 octets (iPhone)</option>
+        <option value="20">20 octets (très lent, si rien ne sort)</option>
+      </select>
     </details>
   </div>
 
@@ -141,7 +148,7 @@ const GRAY_SCALE = 0.9;     // coefficient de Tiny Print pour le X6h en mode gri
 const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print)
 const GRAY_PACKET_PAUSE = 60; // mode gris : attente (ms) après chaque paquet de 20 lignes
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v7';
+const VERSION = '14/11 – v8';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -353,15 +360,17 @@ setInterval(async () => {
 // se perdre en route (plus lent). Indispensable en mode gris : un paquet CF fait
 // environ 3850 octets, soit 22 blocs, et s'il en manque un seul, l'imprimante jette
 // tout le paquet et peut même rester bloquée (rien ne sort).
-async function send(p, delay = 0, safe = false) {
+// size = taille de chaque bloc. En mode N&B, les envois ne dépassent jamais 168 octets ;
+// en mode Gris, ils faisaient 177 octets et l'iPhone semble ne pas les faire passer.
+async function send(p, delay = 0, safe = false, size = BLOC) {
   const withAck = safe && ackOk;
-  for (let i = 0; i < p.length; i += BLOC) {
+  for (let i = 0; i < p.length; i += size) {
     // on attend si l'imprimante est débordée (30 secondes au maximum, par sécurité)
     const t0 = Date.now();
     while (paused && Date.now() - t0 < 30000) await sleep(20);
     paused = false;
     if (!writeChar) throw new Error('liaison coupée');
-    const part = p.subarray(i, i + BLOC);
+    const part = p.subarray(i, i + size);
     if (withAck) {
       if (writeChar.writeValueWithResponse) await writeChar.writeValueWithResponse(part);
       else await writeChar.writeValue(part);
@@ -613,7 +622,13 @@ async function print() {
     // En gris : envoi avec accusé de réception (si l'imprimante l'accepte). L'accusé
     // règle déjà le rythme, on n'ajoute qu'une toute petite attente.
     const safe = m.gray && ackOk;
-    const delay = safe ? 2 : (SEND_DELAYS[document.getElementById('sendSpeed').value] || 20);
+    const baseDelay = safe ? 2 : (SEND_DELAYS[document.getElementById('sendSpeed').value] || 20);
+    // Gros paquets gris : découpés en morceaux de la taille choisie. L'attente est
+    // réduite d'autant, pour garder à peu près le même débit.
+    const grayBloc = +document.getElementById('grayBloc').value || BLOC;
+    const sizeOf = c => (c.length > BLOC ? grayBloc : BLOC);
+    const delayOf = c => (c.length > BLOC ? Math.max(2, Math.round(baseDelay * grayBloc / BLOC)) : baseDelay);
+    const delay = baseDelay;
 
     const total = chunks.reduce((s, p) => s + p.length, 0);
     let sent = 0;
@@ -621,7 +636,7 @@ async function print() {
     let reconnects = 0;
     for (let n = 0; n < chunks.length; n++) {
       try {
-        await send(chunks[n], delay, safe);
+        await send(chunks[n], delayOf(chunks[n]), safe, sizeOf(chunks[n]));
       } catch (e) {
         // La liaison s'est coupée en pleine impression : on se reconnecte
         // et on renvoie le paquet en cours (3 fois au maximum).
@@ -649,7 +664,7 @@ async function print() {
       (notifOk ? `messages reçus : ${replies}` : 'l\'imprimante ne répond pas') +
       (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
       (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
-      (m.gray ? (safe ? ', envoi avec accusé' : ', envoi SANS accusé (non accepté)') : '');
+      (m.gray ? `, morceaux de ${grayBloc} octets` : '');
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
@@ -709,6 +724,7 @@ function setMode(m) {
 for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => setMode(b.dataset.mode);
 setMode('nb');
 document.getElementById('sendSpeed').value = IS_IOS ? 'lent' : 'normal';
+document.getElementById('grayBloc').value = IS_IOS ? '100' : '177';
 document.getElementById('version').textContent = 'Version ' + VERSION;
 </script>
 </body>
