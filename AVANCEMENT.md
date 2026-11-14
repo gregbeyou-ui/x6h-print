@@ -158,6 +158,7 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 | `REGLAGES.md` | Résultats de tous les essais | Oui |
 | `README.md` | Mode d'emploi de la page | Oui |
 | `AVANCEMENT.md` | Ce récapitulatif | Oui |
+| `TESTS_A_FAIRE.md` | Liste des essais à faire sur l'iPhone | Oui |
 | `TROUVAILLES_TINYPRINT.md` | Résumé du code de Tiny Print | Non (privé) |
 | `PROMPT_CLAUDE_CODE.md` | Consignes de départ du projet | Non |
 | `tinyprint/` | APK et code décompilé de Tiny Print | Non |
