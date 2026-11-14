@@ -112,6 +112,7 @@
     <!-- Plusieurs photos choisies dans la galerie : imprimées à la suite -->
     <div id="batchBox" hidden>
       <div class="hint" id="batchHint"></div>
+      <label class="check"><input type="checkbox" id="twoPerRow"> 2 photos par ligne (ticket deux fois plus court)</label>
       <div class="thumbs" id="batchList"></div>
     </div>
 
@@ -168,7 +169,6 @@
   <div class="card">
     <button id="printBtn" disabled>Imprimer</button>
     <div class="progress"><div id="bar"></div></div>
-    <button id="batchPrintBtn" style="margin-top:10px" hidden disabled></button>
     <div style="height:10px"></div>
     <button id="feedBtn" class="secondary" disabled>Faire avancer le papier</button>
   </div>
@@ -248,7 +248,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v17';
+const VERSION = '14/11 – v18';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -628,12 +628,87 @@ function showOrientation() {
   const r = srcRect();
   const kind = r.w > r.h ? 'Photo en largeur (paysage)' : r.w < r.h ? 'Photo en hauteur (portrait)' : 'Photo carrée';
   const auto = rotation === autoRotation() ? ' (choix automatique)' : '';
+  if (isSeries()) {
+    el.textContent = `Photo ${batch.indexOf(currentBatch) + 1} : ${crop ? 'recadrée, ' : ''}tournée de ${rotation}°${auto}. ` +
+      `Ticket complet : ${batch.length} photos, ${Math.round(height / 8)} mm.`;
+    return;
+  }
   el.textContent = `${crop ? 'Recadrée. ' : ''}${kind} : tournée de ${rotation}°${auto}, ticket de ${Math.round(height / 8)} mm.`;
+}
+
+// Série de photos : toutes assemblées sur un seul ticket continu
+const SERIES_GAP = 6;    // blanc entre deux photos de la série, en points (moins d'1 mm)
+function isSeries() { return batch.length >= 2 && currentBatch !== null; }
+
+// Dessine une photo (recadrée, tournée) dans une case de « cellW » points de large
+function photoCell(img, cr, rot, cellW) {
+  const s = cr || { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  const turned = rot % 180 !== 0;
+  const H = Math.round(cellW * (turned ? s.w / s.h : s.h / s.w));
+  const c = document.createElement('canvas'); c.width = cellW; c.height = H;
+  const g = c.getContext('2d');
+  g.translate(cellW / 2, H / 2);
+  g.rotate(rot * Math.PI / 180);
+  const dw = turned ? H : cellW, dh = turned ? cellW : H;
+  g.drawImage(img, s.x, s.y, s.w, s.h, -dw / 2, -dh / 2, dw, dh);
+  return c;
+}
+
+// Assemble la série : 1 ou 2 photos par ligne, le texte une seule fois en bas.
+// Renvoie la hauteur de la partie photos + texte, et la place de chaque photo.
+function layoutSeries(caption, stampH) {
+  const perRow = document.getElementById('twoPerRow').checked ? 2 : 1;
+  const cellW = perRow === 2 ? Math.floor((WIDTH - SERIES_GAP) / 2) : WIDTH;
+  const cells = batch.map(b => photoCell(b.img, b.crop, b.rotation, cellW));
+  const rows = [];
+  for (let i = 0; i < cells.length; i += perRow) rows.push(cells.slice(i, i + perRow));
+  const rowsH = rows.reduce((s, r) => s + Math.max(...r.map(c => c.height)), 0) + SERIES_GAP * (rows.length - 1);
+  const textH = caption ? 50 : 0;
+  const photoH = rowsH + textH;
+  height = photoH + stampH;
+  canvas.width = WIDTH; canvas.height = height;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, WIDTH, height);
+  const regions = [];
+  let y = 0;
+  for (const r of rows) {
+    const rh = Math.max(...r.map(c => c.height));
+    // une photo seule sur sa ligne (nombre impair) est centrée
+    let x = r.length === 1 ? Math.round((WIDTH - r[0].width) / 2) : 0;
+    for (const c of r) {
+      const cy = y + Math.round((rh - c.height) / 2);   // centrée en hauteur dans sa ligne
+      ctx.drawImage(c, x, cy);
+      regions.push({ x, y: cy, w: c.width, h: c.height });
+      x += c.width + SERIES_GAP;
+    }
+    y += rh + SERIES_GAP;
+  }
+  if (caption) {
+    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 26px -apple-system, system-ui, sans-serif';
+    ctx.fillText(caption, WIDTH / 2, rowsH + textH / 2, WIDTH - 16);
+  }
+  return { photoH, regions };
 }
 
 function render() {
   if (!sourceImg) return;
   const caption = document.getElementById('caption').value.trim();
+  const stamp = stampText();
+  const stampH = stamp ? 30 : 0;
+  let photoH, regions;
+  if (isSeries()) {
+    // Photo de la série en cours de réglage : on retient son recadrage et son sens
+    currentBatch.crop = crop; currentBatch.rotation = rotation;
+    ({ photoH, regions } = layoutSeries(caption, stampH));
+  } else {
+    ({ photoH, regions } = layoutSingle(caption, stampH));
+  }
+  showOrientation();
+  finishRender(photoH, regions, stamp, stampH);
+}
+
+// Une seule photo : le texte tourne avec elle
+function layoutSingle(caption, stampH) {
   const textH = caption ? 50 : 0;
   const turned = rotation % 180 !== 0;
 
@@ -660,13 +735,9 @@ function render() {
     c2.fillText(caption, comp.width / 2, imgH + textH / 2, comp.width - 16);
   }
 
-  // 2) On tourne le tout pour l'imprimante (toujours 384 points de large)
+  // 2) On tourne le tout pour l'imprimante (toujours 384 points de large),
+  //    en laissant la place pour la date et le lieu en bas
   const photoH = turned ? comp.width : comp.height;
-  // Photo d'une série : on retient son recadrage et son sens
-  if (currentBatch) { currentBatch.crop = crop; currentBatch.rotation = rotation; }
-  // 3) Date et lieu : une petite ligne en bas du ticket, toujours dans le sens du papier
-  const stamp = stampText();
-  const stampH = stamp ? 30 : 0;
   height = photoH + stampH;
   canvas.width = WIDTH; canvas.height = height;
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, WIDTH, height);
@@ -675,8 +746,11 @@ function render() {
   ctx.rotate(rotation * Math.PI / 180);
   ctx.drawImage(comp, -comp.width / 2, -comp.height / 2);
   ctx.restore();
-  showOrientation();
+  return { photoH, regions: [{ x: 0, y: 0, w: WIDTH, h: photoH }] };
+}
 
+// Traitement commun : gris, amélioration (photo par photo), réglages, tramage, date et lieu
+function finishRender(photoH, regions, stamp, stampH) {
   const bright = +document.getElementById('bright').value;
   const contrast = +document.getElementById('contrast').value;
   const k = (259 * (contrast + 255)) / (255 * (259 - contrast));
@@ -686,7 +760,15 @@ function render() {
   // 1) niveaux de gris, amélioration automatique, puis luminosité + contraste réglés à la main
   const gray = new Float32Array(WIDTH * height);
   for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
-  if (document.getElementById('autoEnhance').checked) enhance(gray, WIDTH, photoH);
+  if (document.getElementById('autoEnhance').checked) {
+    // chaque photo est améliorée séparément (une photo sombre à côté d'une claire)
+    for (const r of regions) {
+      const part = new Float32Array(r.w * r.h);
+      for (let y = 0; y < r.h; y++) part.set(gray.subarray((r.y + y) * WIDTH + r.x, (r.y + y) * WIDTH + r.x + r.w), y * r.w);
+      enhance(part, r.w, r.h);
+      for (let y = 0; y < r.h; y++) gray.set(part.subarray(y * r.w, (y + 1) * r.w), (r.y + y) * WIDTH + r.x);
+    }
+  }
   for (let i = 0; i < gray.length; i++)
     gray[i] = Math.max(0, Math.min(255, k * (gray[i] - 128) + 128 + bright));
   if (MODES[mode].gray) {
@@ -903,7 +985,6 @@ async function print() {
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
     ok = !problem;
     if (currentGuest) { currentGuest.printed = true; renderGuests(); }
-    if (currentBatch) { currentBatch.printed = true; renderBatch(); }
   } catch (e) {
     setStatus('Erreur pendant l\'impression : ' + e.message, 'err');
   }
@@ -1079,42 +1160,55 @@ document.getElementById('cropOk').onclick = () => {
 document.getElementById('cropBtn').onclick = openCrop;
 
 /* =====================================================================
-   SÉRIE DE PHOTOS : on en choisit plusieurs dans la galerie, chacune garde
-   son recadrage et son sens, puis on les imprime toutes à la suite.
+   SÉRIE DE PHOTOS : on en choisit plusieurs dans la galerie. Elles sont
+   assemblées sur UN SEUL ticket (une seule impression, presque sans blanc
+   entre elles, le texte une seule fois en bas), 1 ou 2 photos par ligne.
+   Chaque photo garde son propre recadrage et son propre sens.
    ===================================================================== */
-let batch = [];            // photos de la série : { file, url, crop, rotation, printed }
-let currentBatch = null;   // photo de la série affichée en ce moment
-let batchRunning = false;  // true pendant l'impression de la série
+let batch = [];            // photos de la série : { img, url, crop, rotation }
+let currentBatch = null;   // photo de la série en cours de réglage
 
-function setBatch(files) {
-  for (const b of batch) URL.revokeObjectURL(b.url);
-  batch = files.map(f => ({ file: f, url: URL.createObjectURL(f), crop: null, rotation: null, printed: false }));
-  currentBatch = null;
-  renderBatch();
-  if (batch.length) chooseBatch(batch[0]);
-}
-
-function chooseBatch(b) {
-  currentBatch = null;            // pour ne pas écraser ses réglages pendant le chargement
-  return loadFile(b.file, { crop: b.crop, rotation: b.rotation }).then(() => {
-    currentBatch = b;
-    b.crop = crop; b.rotation = rotation;
-    currentGuest = null; renderGuests();
-    renderBatch();
+function loadImage(file) {
+  return new Promise(ok => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => ok(null);
+    img.src = URL.createObjectURL(file);
   });
 }
 
+// Sens automatique d'une photo de la série (même règle que pour une photo seule)
+function autoRotationOf(img, cr) {
+  const s = cr || { w: img.naturalWidth, h: img.naturalHeight };
+  return s.w > s.h ? 90 : 0;
+}
+
+async function setBatch(files) {
+  for (const b of batch) URL.revokeObjectURL(b.url);
+  batch = []; currentBatch = null;
+  if (files.length) setStatus(`Chargement des ${files.length} photos…`);
+  const imgs = await Promise.all(files.map(loadImage));
+  batch = imgs.filter(Boolean).map(img => ({ img, url: img.src, crop: null, rotation: autoRotationOf(img, null) }));
+  if (files.length) setStatus(device ? 'Prête à imprimer ✓' : 'Non connectée');
+  if (batch.length === 1) { const b = batch[0]; batch = []; sourceImg = b.img; crop = null; rotation = b.rotation; render(); }
+  else if (batch.length) chooseBatch(batch[0]);
+  renderBatch();
+}
+
+// Photo de la série à régler (recadrer, tourner) : l'aperçu montre toujours tout le ticket
+function chooseBatch(b) {
+  currentBatch = b;
+  sourceImg = b.img; crop = b.crop; rotation = b.rotation;
+  currentGuest = null; renderGuests();
+  render();
+  renderBatch();
+}
+
 function renderBatch() {
-  const box = document.getElementById('batchBox');
-  const btn = document.getElementById('batchPrintBtn');
-  box.hidden = batch.length < 2;
-  btn.hidden = batch.length < 2;
-  const left = batch.filter(b => !b.printed).length;
+  const series = batch.length >= 2;
+  document.getElementById('batchBox').hidden = !series;
   document.getElementById('batchHint').textContent =
-    `${batch.length} photos choisies. Touche une photo pour la recadrer ou la tourner, ` +
-    `puis imprime-les toutes à la suite.`;
-  btn.textContent = left === batch.length ? `🖨️ Imprimer les ${batch.length} photos à la suite`
-                  : left ? `🖨️ Imprimer les ${left} photos restantes` : '✓ Toutes imprimées — recommencer';
+    `${batch.length} photos sur un seul ticket. Touche une photo pour la recadrer ou la tourner.`;
   const list = document.getElementById('batchList');
   list.innerHTML = '';
   batch.forEach((b, i) => {
@@ -1123,30 +1217,18 @@ function renderBatch() {
     const im = document.createElement('img'); im.src = b.url; im.alt = '';
     const name = document.createElement('span'); name.textContent = `Photo ${i + 1}`;
     d.append(im, name);
-    if (b.printed) { const t = document.createElement('b'); t.textContent = '✓ imprimée'; d.append(t); }
-    d.onclick = () => { if (!batchRunning) chooseBatch(b); };
+    d.onclick = () => { if (!printing) chooseBatch(b); };
     list.append(d);
   });
+  document.getElementById('printBtn').textContent =
+    series && currentBatch ? `Imprimer les ${batch.length} photos` : 'Imprimer';
   updateButtons();
 }
-
-async function printBatch() {
-  if (batchRunning || batch.length < 2) return;
-  if (batch.every(b => b.printed)) batch.forEach(b => { b.printed = false; });   // recommencer
-  batchRunning = true; updateButtons();
-  const todo = batch.filter(b => !b.printed);
-  for (let i = 0; i < todo.length; i++) {
-    await chooseBatch(todo[i]);
-    printLabel = `Photo ${i + 1} sur ${todo.length} — `;
-    const ok = await print();
-    printLabel = '';
-    if (!ok) break;                                // problème : on s'arrête, la suite reste à faire
-    if (i < todo.length - 1) await sleep(1500);    // petite pause entre deux tickets
-  }
-  batchRunning = false;
-  renderBatch();
-}
-document.getElementById('batchPrintBtn').onclick = printBatch;
+document.getElementById('twoPerRow').onchange = () => {
+  try { localStorage.setItem('x6h-2-par-ligne', document.getElementById('twoPerRow').checked ? '1' : '0'); } catch (_) {}
+  render();
+};
+try { document.getElementById('twoPerRow').checked = localStorage.getItem('x6h-2-par-ligne') === '1'; } catch (_) {}
 
 /* =====================================================================
    PHOTOS DES AMIS : un QR code mène à envoyer.html, qui se relie directement
@@ -1283,8 +1365,7 @@ document.addEventListener('visibilitychange', () => {
    ===================================================================== */
 function updateButtons() {
   // On garde les boutons actifs même quand la liaison dort : elle se rétablit toute seule
-  document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing || batchRunning;
-  document.getElementById('batchPrintBtn').disabled = !device || printing || batchRunning;
+  document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing;
   document.getElementById('feedBtn').disabled  = !device || printing;
   document.getElementById('rotateBtn').disabled = !sourceImg || printing;
   document.getElementById('cropBtn').disabled = !sourceImg || printing;

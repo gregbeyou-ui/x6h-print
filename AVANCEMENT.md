@@ -73,7 +73,8 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 ### Plusieurs photos et amélioration automatique (v17)
 
-- **Série** : la Galerie accepte plusieurs photos. Elles s'affichent en vignettes ; chacune garde son recadrage et son sens. Le bouton « Imprimer les N photos à la suite » les imprime l'une après l'autre (1,5 s entre deux tickets). En cas de problème (papier, batterie), la série s'arrête et le bouton propose les photos restantes.
+- **Série** : la Galerie accepte plusieurs photos. Elles s'affichent en vignettes ; chacune garde son recadrage et son sens.
+- **v18** (après un essai de 5 photos à la suite, jugé trop long en v17 : une impression par photo, avec avance du papier, texte répété et pause entre chaque) : la série est assemblée sur **un seul ticket** et part en **une seule impression**. 6 points de blanc (moins d'1 mm) entre deux photos ; texte et date/lieu une seule fois, en bas. Option « 2 photos par ligne » (cases de 189 points de large, gardée dans le téléphone) : ticket environ trois fois plus court. Exemple : 5 photos = 349 mm à 1 par ligne, 118 mm à 2 par ligne.
 - **Amélioration automatique** (case cochée par défaut), appliquée avant le tramage, d'après les méthodes courantes pour les imprimantes thermiques (auto-niveaux, réglage des tons moyens, accentuation de la netteté, puis tramage) :
   1. étirement des niveaux : 1 % des points les plus sombres → noir, 1 % les plus clairs → blanc ;
   2. tons moyens : correction gamma pour amener la moyenne à 55 % de clarté (entre 0,6 et 1,7) ;
