@@ -81,7 +81,7 @@
       <label>Énergie (noirceur) <span id="energyVal"></span></label>
       <input type="range" id="energy" min="2000" max="15000" step="250" value="8000">
       <label>Vitesse (petit = rapide) <span id="speedVal"></span></label>
-      <input type="range" id="speed" min="10" max="60" step="1" value="30">
+      <input type="range" id="speed" min="10" max="200" step="5" value="30">
       <label>Rythme d'envoi Bluetooth</label>
       <select id="sendSpeed">
         <option value="rapide">Rapide (PC)</option>
@@ -151,7 +151,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v10';
+const VERSION = '14/11 – v11';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -673,7 +673,7 @@ async function print() {
       (before === null ? '' : `, état avant : ${before.toString(16).padStart(2, '0')}`) +
       (after === null ? ', après : pas de réponse' : `, après : ${after.toString(16).padStart(2, '0')}`) +
       (m.gray ? `, morceaux de ${grayBloc} octets` : '') +
-      `, rythme : ${document.getElementById('sendSpeed').value}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
+      `, rythme : ${document.getElementById('sendSpeed').value}, vitesse : ${speed}, énergie : ${energy}, durée : ${Math.round((Date.now() - t0) / 1000)} s`;
     const problem = stateProblem(after ?? before);
     if (problem) setStatus(`Envoyé, mais l'imprimante signale : ${problem}. (${info})`, 'err');
     else setStatus(`Envoyé ✓ (${info})`, 'ok');
