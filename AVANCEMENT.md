@@ -58,6 +58,13 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 1. Dans Bluefy (v13), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
 2. Essayer le bouton « 📲 Amis » avec un deuxième téléphone : scanner le QR code, envoyer une photo, l'imprimer. Essayer aussi avec l'ami en 4G/5G (pas sur le même Wi-Fi).
 
+### Sens d'impression (v14)
+
+- Photo en hauteur ou carrée : imprimée droite (0°). Photo en largeur : tournée de 90° (sens des aiguilles d'une montre) pour qu'elle s'étale dans la longueur du papier. Exemple : une photo 3:2 en largeur passe de 32 mm à 72 mm de ticket.
+- Le texte sous la photo tourne avec elle.
+- Bouton « ↻ Tourner de 90° » : ajoute 90° à chaque appui. Sous l'aperçu, la page indique le sens choisi et la longueur du ticket.
+- Pas encore imprimé sur papier.
+
 ### Photos des invités (v13) : comment ça marche
 
 - Le bouton **📲 Amis** affiche un QR code vers `envoyer.html#<identifiant>`. L'identifiant est gardé dans le téléphone : le QR code reste le même d'une fois sur l'autre.

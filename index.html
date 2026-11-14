@@ -82,6 +82,8 @@
       <canvas id="canvas" hidden></canvas>
       <span class="empty" id="emptyMsg">Aucune photo choisie</span>
     </div>
+    <button class="secondary" id="rotateBtn" style="margin-top:10px" disabled>↻ Tourner de 90°</button>
+    <div class="hint" id="orientHint" style="text-align:center"></div>
 
     <label>Luminosité <span id="brightVal">0</span></label>
     <input type="range" id="bright" min="-100" max="100" value="0">
@@ -179,7 +181,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v13';
+const VERSION = '14/11 – v14';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -476,28 +478,68 @@ function toLevels(gray, w, h) {
   return out;
 }
 
+/* Sens d'impression : le papier fait 384 points de large mais il est aussi long
+   qu'on veut. Pour avoir la plus grande image possible :
+   - photo en hauteur (portrait) ou carrée : imprimée droite (0°) ;
+   - photo en largeur (paysage) : tournée de 90°, elle s'étale dans la longueur du papier.
+   Le bouton « Tourner » ajoute 90° à chaque appui. */
+let rotation = 0;   // 0, 90, 180 ou 270 degrés (sens des aiguilles d'une montre)
+
+function autoRotation(img) { return img.width > img.height ? 90 : 0; }
+
 function loadFile(file) {
   if (!file) return;
   const img = new Image();
-  img.onload = () => { sourceImg = img; render(); };
+  img.onload = () => { sourceImg = img; rotation = autoRotation(img); render(); };
   img.src = URL.createObjectURL(file);
+}
+
+function showOrientation() {
+  const el = document.getElementById('orientHint');
+  if (!sourceImg) { el.textContent = ''; return; }
+  const kind = sourceImg.width > sourceImg.height ? 'Photo en largeur (paysage)'
+             : sourceImg.width < sourceImg.height ? 'Photo en hauteur (portrait)' : 'Photo carrée';
+  const auto = rotation === autoRotation(sourceImg) ? ' (choix automatique)' : '';
+  el.textContent = `${kind} : tournée de ${rotation}°${auto}, ticket de ${Math.round(height / 8)} mm.`;
 }
 
 function render() {
   if (!sourceImg) return;
   const caption = document.getElementById('caption').value.trim();
-  const imgH = Math.round(sourceImg.height * WIDTH / sourceImg.width);
   const textH = caption ? 50 : 0;
-  height = imgH + textH;
-  canvas.width = WIDTH; canvas.height = height;
+  const turned = rotation % 180 !== 0;
 
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, WIDTH, height);
-  ctx.drawImage(sourceImg, 0, 0, WIDTH, imgH);
-  if (caption) {
-    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 26px -apple-system, system-ui, sans-serif';
-    ctx.fillText(caption, WIDTH / 2, imgH + textH / 2, WIDTH - 16);
+  // 1) On compose photo + texte dans le sens de la photo.
+  //    Droite : la largeur fait 384 points. Tournée : c'est la hauteur qui fait 384 points.
+  const comp = document.createElement('canvas');
+  let imgW, imgH;
+  if (turned) {
+    imgH = WIDTH - textH;
+    imgW = Math.round(sourceImg.width * imgH / sourceImg.height);
+    comp.width = imgW; comp.height = WIDTH;
+  } else {
+    imgW = WIDTH;
+    imgH = Math.round(sourceImg.height * WIDTH / sourceImg.width);
+    comp.width = WIDTH; comp.height = imgH + textH;
   }
+  const c2 = comp.getContext('2d');
+  c2.fillStyle = '#fff'; c2.fillRect(0, 0, comp.width, comp.height);
+  c2.drawImage(sourceImg, 0, 0, imgW, imgH);
+  if (caption) {
+    c2.fillStyle = '#000'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+    c2.font = 'bold 26px -apple-system, system-ui, sans-serif';
+    c2.fillText(caption, comp.width / 2, imgH + textH / 2, comp.width - 16);
+  }
+
+  // 2) On tourne le tout pour l'imprimante (toujours 384 points de large)
+  height = turned ? comp.width : comp.height;
+  canvas.width = WIDTH; canvas.height = height;
+  ctx.save();
+  ctx.translate(WIDTH / 2, height / 2);
+  ctx.rotate(rotation * Math.PI / 180);
+  ctx.drawImage(comp, -comp.width / 2, -comp.height / 2);
+  ctx.restore();
+  showOrientation();
 
   const bright = +document.getElementById('bright').value;
   const contrast = +document.getElementById('contrast').value;
@@ -859,12 +901,14 @@ function updateButtons() {
   // On garde les boutons actifs même quand la liaison dort : elle se rétablit toute seule
   document.getElementById('printBtn').disabled = !device || !(bits || levels) || printing;
   document.getElementById('feedBtn').disabled  = !device || printing;
+  document.getElementById('rotateBtn').disabled = !sourceImg || printing;
   document.getElementById('connectBtn').textContent = device ? 'Changer d\'imprimante' : 'Connecter l\'imprimante';
 }
 
 document.getElementById('connectBtn').onclick = connect;
 document.getElementById('printBtn').onclick = print;
 document.getElementById('feedBtn').onclick = feed;
+document.getElementById('rotateBtn').onclick = () => { rotation = (rotation + 90) % 360; render(); };
 document.getElementById('camInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
 document.getElementById('galInput').onchange = e => { currentGuest = null; renderGuests(); loadFile(e.target.files[0]); };
 

@@ -13,6 +13,7 @@ Une page web pour imprimer des photos sur une mini-imprimante thermique Bluetoot
 2. **Connecter l'imprimante**, choisir l'appareil dont le nom commence par `X6h`.
 3. Choisir une photo, régler luminosité et contraste, ajouter un texte si besoin.
    - **📲 Amis** : affiche un QR code. Les amis le scannent avec l'appareil photo de leur téléphone (Safari ou Chrome suffit, pas besoin de Bluefy), choisissent une photo et l'envoient. Elle apparaît dans la liste ; la toucher la prépare pour l'impression. La page doit rester ouverte à l'écran pendant ce temps, et les deux téléphones doivent avoir internet.
+   - **Sens d'impression automatique** : une photo en hauteur est imprimée droite, une photo en largeur est tournée de 90° pour s'étaler dans la longueur du papier (image plus grande). Le bouton **↻ Tourner de 90°** change le sens à la main.
 4. Choisir le mode, puis **Imprimer** :
    - **N&B** : noir profond, texte net, rendu granuleux ;
    - **Gris** : 16 niveaux de gris, dégradés lisses, plus lent.
