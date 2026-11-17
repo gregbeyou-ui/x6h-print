@@ -161,6 +161,31 @@
       <button class="secondary" data-mode="gris">✨ Gris</button>
     </div>
     <div class="hint" id="modeHint"></div>
+    <!-- Style : photo tramée (normal) ou dessinée en caractères (ASCII) -->
+    <div class="row" id="styleRow" style="margin-top:10px">
+      <button data-style="photo">📷 Photo</button>
+      <button class="secondary" data-style="ascii">🔤 ASCII</button>
+    </div>
+    <div id="asciiBox" hidden>
+      <label>🔠 Caractères sur la largeur du papier <span id="asciiColsVal">48</span></label>
+      <input type="range" id="asciiCols" min="16" max="96" step="2" value="48">
+      <div class="hint" style="margin-top:2px">Peu = gros caractères lisibles ; beaucoup = plus de détails.</div>
+      <label>Caractères utilisés</label>
+      <select id="asciiSet">
+        <option value="classique">Classique  .:-=+*#%@</option>
+        <option value="detaille">Détaillé (70 caractères)</option>
+        <option value="blocs">Blocs ░▒▓█</option>
+        <option value="phrase">Une phrase répétée</option>
+        <option value="perso">Mes caractères</option>
+      </select>
+      <input type="text" id="asciiText" style="margin-top:8px" hidden>
+      <div class="hint" id="asciiTextHint" hidden></div>
+      <div class="row tools">
+        <label class="check small"><input type="checkbox" id="asciiBold" checked> Gras</label>
+        <label class="check small"><input type="checkbox" id="asciiInvert"> Fond noir</label>
+      </div>
+      <div class="hint" id="asciiHint"></div>
+    </div>
     <label>☀️ Luminosité <span id="brightVal">0</span></label>
     <input type="range" id="bright" min="-100" max="100" value="0">
     <label>◐ Contraste <span id="contrastVal">0</span></label>
@@ -296,7 +321,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '14/11 – v25';
+const VERSION = '17/11 – v26';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -671,6 +696,7 @@ function photoCell(img, cr, rot, cellW) {
   g.rotate(rot * Math.PI / 180);
   const dw = turned ? H : cellW, dh = turned ? cellW : H;
   g.drawImage(img, s.x, s.y, s.w, s.h, -dw / 2, -dh / 2, dw, dh);
+  c.rot = rot;   // retenu pour le rendu ASCII (caractères à l'endroit de la photo)
   return c;
 }
 
@@ -720,7 +746,7 @@ function layoutSeries(caption, stampH) {
     for (const c of r) {
       const cy = y + Math.round((rh - c.height) / 2);   // centrée en hauteur dans sa ligne
       ctx.drawImage(c, x, cy);
-      regions.push({ x, y: cy, w: c.width, h: c.height });
+      regions.push({ x, y: cy, w: c.width, h: c.height, rot: c.rot });
       x += c.width + SERIES_GAP;
     }
     y += rh + SERIES_GAP;
@@ -730,7 +756,7 @@ function layoutSeries(caption, stampH) {
     ctx.font = 'bold 26px -apple-system, system-ui, sans-serif';
     ctx.fillText(caption, WIDTH / 2, rowsH + textH / 2, WIDTH - 16);
   }
-  return { photoH, regions };
+  return { photoH, regions, asciiRegions: regions };
 }
 
 function render() {
@@ -738,18 +764,18 @@ function render() {
   const caption = document.getElementById('caption').value.trim();
   const stamp = stampText();
   const stampH = stamp ? 30 : 0;
-  let photoH, regions;
+  let photoH, regions, asciiRegions;
   if (isSeries()) {
     // Photo de la série en cours de réglage : on retient son recadrage et son sens
     currentBatch.crop = crop; currentBatch.rotation = rotation;
-    ({ photoH, regions } = layoutSeries(caption, stampH));
+    ({ photoH, regions, asciiRegions } = layoutSeries(caption, stampH));
   } else {
-    ({ photoH, regions } = layoutSingle(caption, stampH));
+    ({ photoH, regions, asciiRegions } = layoutSingle(caption, stampH));
   }
   showOrientation();
   // Photo d'un ami : si on retouche ses réglages ici, elle les garde
   if (currentGuest) currentGuest.look = currentLook();
-  finishRender(photoH, regions, stamp, stampH);
+  finishRender(photoH, regions, stamp, stampH, asciiRegions);
   // Rappel, près du bouton Imprimer, de ce qui sera ajouté (réglé dans « Plus d'options »)
   const extras = [caption && `texte « ${caption} »`, stamp && `« ${stamp} »`].filter(Boolean);
   const ex = document.getElementById('extrasHint');
@@ -809,11 +835,19 @@ function layoutSingle(caption, stampH) {
   ctx.rotate(rotation * Math.PI / 180);
   ctx.drawImage(comp, -comp.width / 2, -comp.height / 2);
   ctx.restore();
-  return { photoH, regions: [{ x: 0, y: 0, w: WIDTH, h: photoH }] };
+  // Place de la photo seule (sans le texte), selon le sens, pour le rendu ASCII :
+  // le texte reste écrit normalement, lisible
+  const P = {
+    0:   { x: 0, y: 0, w: WIDTH, h: imgH },
+    90:  { x: textH, y: 0, w: imgH, h: photoH },
+    180: { x: 0, y: textH, w: WIDTH, h: imgH },
+    270: { x: 0, y: 0, w: imgH, h: photoH },
+  }[rotation % 360];
+  return { photoH, regions: [{ x: 0, y: 0, w: WIDTH, h: photoH }], asciiRegions: [{ ...P, rot: rotation % 360 }] };
 }
 
 // Traitement commun : gris, amélioration (photo par photo), réglages, tramage, date et lieu
-function finishRender(photoH, regions, stamp, stampH) {
+function finishRender(photoH, regions, stamp, stampH, asciiRegions = regions) {
   const bright = +document.getElementById('bright').value;
   const contrast = +document.getElementById('contrast').value;
   const k = (259 * (contrast + 255)) / (255 * (259 - contrast));
@@ -834,6 +868,21 @@ function finishRender(photoH, regions, stamp, stampH) {
   }
   for (let i = 0; i < gray.length; i++)
     gray[i] = Math.max(0, Math.min(255, k * (gray[i] - 128) + 128 + bright));
+  // Style ASCII : chaque photo est redessinée en caractères (calculé avant le tramage,
+  // qui modifie le tableau gray). Le résultat remplace la photo tramée plus bas.
+  // Une photo tournée est remise à l'endroit le temps d'écrire les caractères,
+  // pour qu'ils se lisent dans le sens de la photo, puis retournée.
+  // La taille des caractères dépend de la largeur du papier : même taille partout.
+  const asciiParts = style === 'ascii' ? asciiRegions.map(r => {
+    const part = new Float32Array(r.w * r.h);
+    for (let y = 0; y < r.h; y++) part.set(gray.subarray((r.y + y) * WIDTH + r.x, (r.y + y) * WIDTH + r.x + r.w), y * r.w);
+    const rot = r.rot || 0;
+    const up = rotateGrid(part, r.w, r.h, (360 - rot) % 360);
+    const o = asciiOptions();
+    o.cols = Math.max(4, Math.round(o.cols * up.w / WIDTH));
+    const ink = asciiArt(up.a, up.w, up.h, o);
+    return { r, ink: rotateGrid(ink, up.w, up.h, rot).a };
+  }) : [];
   if (MODES[mode].gray) {
     // 2) mode gris : chaque point reçoit un niveau de chauffe de 0 (blanc) à 15 (noir)
     bits = null;
@@ -852,6 +901,17 @@ function finishRender(photoH, regions, stamp, stampH) {
     for (let i = 0; i < bits.length; i++) {
       const v = bits[i] ? 0 : 255;
       px[i*4] = px[i*4+1] = px[i*4+2] = v; px[i*4+3] = 255;
+    }
+  }
+  // 3 bis) ASCII : les caractères remplacent la photo tramée (noir pur en N&B ;
+  //        en Gris, les bords adoucis des caractères deviennent des gris)
+  for (const { r, ink } of asciiParts) {
+    for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) {
+      const v = ink[y * r.w + x], j = (r.y + y) * WIDTH + r.x + x;
+      let shown;
+      if (bits) { bits[j] = v > 0.5 ? 1 : 0; shown = bits[j] ? 0 : 255; }
+      else { levels[j] = inkToLevel(v); shown = Math.round(255 * (1 - DARKNESS[levels[j]])); }
+      px[j*4] = px[j*4+1] = px[j*4+2] = shown; px[j*4+3] = 255;
     }
   }
   // 4) Date et lieu : texte en noir pur, sans tramage ni réglages, pour qu'il reste net
@@ -940,6 +1000,7 @@ async function saveState() {
     bright: document.getElementById('bright').value,
     contrast: document.getElementById('contrast').value,
     autoEnhance: document.getElementById('autoEnhance').checked,
+    style, ascii: { ...asciiOptions(), texts: { ...asciiTexts } },
     kind,
     crop: kind === 'single' || kind === 'guest' ? crop : null,
     rotation: kind === 'single' || kind === 'guest' ? rotation : null,
@@ -971,6 +1032,17 @@ async function restoreState() {
     }
     showResetLook();
     document.getElementById('autoEnhance').checked = st.autoEnhance !== false;
+    // Style ASCII et ses réglages
+    if (st.ascii) {
+      const a = st.ascii;
+      if (a.cols) document.getElementById('asciiCols').value = a.cols;
+      if (a.set && [...document.getElementById('asciiSet').options].some(o => o.value === a.set))
+        document.getElementById('asciiSet').value = a.set;
+      document.getElementById('asciiBold').checked = a.bold !== false;
+      document.getElementById('asciiInvert').checked = !!a.invert;
+      for (const key of ['phrase', 'perso']) if (a.texts && a.texts[key]) asciiTexts[key] = a.texts[key];
+    }
+    setStyle(st.style, false);
     // Photos des amis
     for (const g of st.guests || []) {
       const blob = await readPhoto(g.id);
@@ -1815,6 +1887,57 @@ function setMode(m, redraw = true) {
   if (redraw) broadcastMode();
 }
 for (const b of document.querySelectorAll('#modeRow button')) b.onclick = () => setMode(b.dataset.mode);
+
+/* Style : « Photo » (tramage normal) ou « ASCII » (photo dessinée en caractères).
+   Indépendant du mode : l'ASCII s'imprime en N&B (caractères noirs bien nets) ou en
+   Gris (bords des caractères plus doux). S'applique aussi aux photos des amis. */
+let style = 'photo';
+const ASCII_TEXT_DEFAULT = { phrase: 'X6H PRINT', perso: ' .oO@' };
+const asciiTexts = { ...ASCII_TEXT_DEFAULT };   // texte gardé à part pour « phrase » et « mes caractères »
+function asciiOptions() {
+  const set = document.getElementById('asciiSet').value;
+  return {
+    cols: +document.getElementById('asciiCols').value,
+    set,
+    text: asciiTexts[set] || '',
+    bold: document.getElementById('asciiBold').checked,
+    invert: document.getElementById('asciiInvert').checked,
+  };
+}
+function showAsciiFields() {
+  const set = document.getElementById('asciiSet').value;
+  const t = document.getElementById('asciiText'), h = document.getElementById('asciiTextHint');
+  const withText = set === 'phrase' || set === 'perso';
+  t.hidden = h.hidden = !withText;
+  if (withText) {
+    t.value = asciiTexts[set];
+    t.placeholder = ASCII_TEXT_DEFAULT[set];
+    h.textContent = set === 'phrase'
+      ? 'La phrase est écrite en boucle là où la photo est foncée (en gras là où elle est très foncée).'
+      : 'Tape les caractères de ton choix, dans n\'importe quel ordre : la page mesure elle-même lesquels sont les plus foncés.';
+  }
+  document.getElementById('asciiColsVal').textContent = document.getElementById('asciiCols').value;
+  document.getElementById('asciiHint').textContent = document.getElementById('asciiInvert').checked
+    ? 'Fond noir : beaucoup de papier chauffé, l\'impression est plus lente et la tête chauffe.' : '';
+}
+function setStyle(s, redraw = true) {
+  style = s === 'ascii' ? 'ascii' : 'photo';
+  for (const b of document.querySelectorAll('#styleRow button'))
+    b.className = b.dataset.style === style ? '' : 'secondary';
+  document.getElementById('asciiBox').hidden = style !== 'ascii';
+  showAsciiFields();
+  if (redraw) { render(); scheduleSave(); }
+}
+for (const b of document.querySelectorAll('#styleRow button')) b.onclick = () => setStyle(b.dataset.style);
+// Les réglages ASCII redessinent l'aperçu dès qu'on les touche
+document.getElementById('asciiCols').oninput = () => { showAsciiFields(); render(); scheduleSave(); };
+for (const id of ['asciiSet', 'asciiBold', 'asciiInvert'])
+  document.getElementById(id).onchange = () => { showAsciiFields(); render(); scheduleSave(); };
+document.getElementById('asciiText').oninput = e => {
+  const set = document.getElementById('asciiSet').value;
+  asciiTexts[set] = e.target.value || ASCII_TEXT_DEFAULT[set];   // vide : on reprend l'exemple
+  render(); scheduleSave();
+};
 setMode('nb');
 document.getElementById('grayBloc').value = IS_IOS ? '100' : '177';
 document.getElementById('version').textContent = 'Version ' + VERSION;

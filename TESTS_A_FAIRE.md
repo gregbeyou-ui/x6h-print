@@ -1,4 +1,4 @@
-# Tests à faire (15/11/2026)
+# Tests à faire (17/11/2026)
 
 Tests 1 à 7 : sur l'iPhone, dans Bluefy. Test 8 : sur le PC. Avant de commencer : recharger la page et vérifier qu'il est écrit **v22** (ou plus) tout en bas.
 
@@ -91,3 +91,20 @@ Fermer Bluefy sur l'iPhone d'abord (l'imprimante ne se connecte qu'à un apparei
 **Test du papier** (si tu peux) : ouvrir le capot (ou enlever le rouleau), puis envoyer une photo.
 - [ ] La photo passe-t-elle « en attente » avec « Impression en pause » ?
 - [ ] Après avoir remis le papier : cocher la photo, confirmer, est-ce qu'elle s'imprime ?
+
+## 9. Rendu ASCII (v26)
+
+Vérifier qu'il est écrit **v26** tout en bas de la page. Choisir une photo avec un visage, mode **N&B**, puis **🔤 ASCII**.
+
+1. Imprimer avec les réglages par défaut (Classique, 48 caractères, Gras).
+2. Essayer **24** puis **80** caractères : lequel donne la plus belle image ? les caractères restent-ils lisibles à 80 ?
+3. Essayer **Blocs** en mode **Gris**.
+4. Essayer **Une phrase répétée** avec un prénom.
+5. Bonus : **Fond noir** sur une photo courte.
+
+À noter :
+- [ ] Le ticket ressemble-t-il à l'aperçu ?
+- [ ] Gras coché ou non : lequel est le plus lisible sur le papier ?
+- [ ] Les caractères `░▒▓` des Blocs s'affichent-ils bien dans Bluefy (pas de carrés vides) ?
+- [ ] Fond noir : le noir est-il régulier, sans bandes blanches ? Durée (message de fin) :
+- [ ] Photo en largeur (tournée) : les caractères sont-ils dans le sens de la photo ?

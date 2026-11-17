@@ -145,6 +145,120 @@ function toLevelsTinyPrint(gray, w, h) {
   return out;
 }
 
+/* =====================================================================
+   RENDU ASCII (v26) : la photo est redessinée avec des caractères.
+   On découpe l'image en cases (une case = un caractère). Pour chaque case, on
+   mesure sa noirceur moyenne, puis on y écrit le caractère qui « noircit » le plus
+   pareil : un espace pour le blanc, un @ pour le noir, etc.
+   La noirceur de chaque caractère est mesurée pour de vrai (on le dessine et on
+   compte ses points noirs) : n'importe quels caractères marchent, dans n'importe
+   quel ordre.
+   ===================================================================== */
+const ASCII_SETS = {
+  classique: ' .:-=+*#%@',
+  detaille: ' .\'`^",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$',
+  blocs: ' ░▒▓█',
+};
+const ASCII_FONT = 'Menlo, Consolas, "DejaVu Sans Mono", "Courier New", monospace';
+
+// Mesure la noirceur de chaque caractère (0 = rien, 1 = le plus noir de la liste)
+function glyphRamp(text, font, cw, ch) {
+  const chars = [...new Set([...text])];
+  const W = Math.max(2, Math.ceil(cw)), H = Math.max(2, Math.ceil(ch));
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  c.font = font; c.textAlign = 'center'; c.textBaseline = 'middle';
+  let ramp = chars.map(g => {
+    c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#000'; c.fillText(g, W / 2, H / 2);
+    const d = c.getImageData(0, 0, W, H).data;
+    let ink = 0;
+    for (let i = 0; i < d.length; i += 4) ink += 1 - d[i] / 255;
+    return { g, d: ink / (W * H) };
+  });
+  if (!ramp.some(r => r.g === ' ')) ramp.push({ g: ' ', d: 0 });   // toujours un « blanc »
+  const lo = Math.min(...ramp.map(r => r.d)), hi = Math.max(...ramp.map(r => r.d));
+  ramp = ramp.map(r => ({ g: r.g, d: hi > lo ? (r.d - lo) / (hi - lo) : 0 }));
+  return ramp.sort((a, b) => a.d - b.d);
+}
+
+/* gray : gris 0 à 255 (déjà amélioré et réglé), w × h points.
+   o : { cols (caractères par ligne), set ('classique', 'detaille', 'blocs', 'phrase',
+         'perso'), text (la phrase ou mes caractères), bold, invert (fond noir) }
+   Renvoie la noirceur de chaque point (0 = blanc, 1 = noir). */
+function asciiArt(gray, w, h, o) {
+  const weight = o.bold ? 'bold ' : '';
+  // Taille de police pour que « cols » caractères remplissent la largeur
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  c.font = weight + '100px ' + ASCII_FONT;
+  const adv = c.measureText('M').width / 100;       // largeur d'un caractère pour une police de 1 point
+  const cw = w / o.cols, fs = cw / adv;
+  const rows = Math.max(1, Math.round(h / (fs * 1.1))), ch = h / rows;   // un caractère est plus haut que large
+  const font = weight + fs.toFixed(2) + 'px ' + ASCII_FONT;
+  const boldFont = 'bold ' + fs.toFixed(2) + 'px ' + ASCII_FONT;
+
+  // Fond (blanc, ou noir si « Fond noir ») et couleur des caractères
+  c.fillStyle = o.invert ? '#000' : '#fff'; c.fillRect(0, 0, w, h);
+  c.fillStyle = o.invert ? '#fff' : '#000';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+
+  const phrase = o.set === 'phrase';
+  const letters = phrase ? [...(o.text || 'X6H').replace(/\s+/g, '')] : null;
+  const chars = phrase ? null : (o.set === 'perso' ? (o.text || ASCII_SETS.classique) : (ASCII_SETS[o.set] || ASCII_SETS.classique));
+  const ramp = phrase ? null : glyphRamp(chars, font, cw, ch);
+  let k = 0;   // position dans la phrase
+
+  for (let r = 0; r < rows; r++) {
+    const y0 = Math.round(r * ch), y1 = Math.round((r + 1) * ch);
+    for (let col = 0; col < o.cols; col++) {
+      const x0 = Math.round(col * cw), x1 = Math.round((col + 1) * cw);
+      // noirceur moyenne de la case
+      let s = 0, n = 0;
+      for (let y = y0; y < y1 && y < h; y++)
+        for (let x = x0; x < x1 && x < w; x++) { s += 1 - gray[y * w + x] / 255; n++; }
+      const dark = n ? s / n : 0;
+      const t = o.invert ? 1 - dark : dark;   // fond noir : un caractère blanc = de la clarté
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      if (phrase) {
+        // Phrase : on écrit la lettre suivante seulement là où l'image est assez foncée,
+        // en gras là où elle est très foncée. La silhouette apparaît faite de mots.
+        if (t < 0.3) continue;
+        c.font = (t > 0.6 ? boldFont : font);
+        c.fillText(letters[k++ % letters.length], cx, cy);
+      } else {
+        let best = ramp[0];
+        for (const g of ramp) if (Math.abs(g.d - t) < Math.abs(best.d - t)) best = g;
+        if (best.g !== ' ') { c.font = font; c.fillText(best.g, cx, cy); }
+      }
+    }
+  }
+  const d = c.getImageData(0, 0, w, h).data;
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = 1 - d[i * 4] / 255;
+  return out;
+}
+
+// Tourne un tableau de w × h points de « deg » degrés (0, 90, 180 ou 270, sens des
+// aiguilles d'une montre). Renvoie { a, w, h } (largeur et hauteur échangées à 90° et 270°).
+function rotateGrid(a, w, h, deg) {
+  for (let t = 0; t < (((deg / 90) | 0) % 4 + 4) % 4; t++) {
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) out[x * h + (h - 1 - y)] = a[y * w + x];
+    a = out; [w, h] = [h, w];
+  }
+  return { a, w, h };
+}
+
+// Mode gris : niveau de chauffe dont la noirceur est la plus proche (sans tramage,
+// pour garder les caractères nets ; les bords adoucis passent en gris)
+function inkToLevel(v) {
+  let best = GRAY_PALETTE[0];
+  for (const p of GRAY_PALETTE) if (Math.abs(p.d - v) < Math.abs(best.d - v)) best = p;
+  return best.l;
+}
+
 // Luminosité (-100 à 100) et contraste (-100 à 100), réglés à la main, par-dessus le reste
 function applyLook(gray, bright, contrast) {
   const k = (259 * (contrast + 255)) / (255 * (259 - contrast));

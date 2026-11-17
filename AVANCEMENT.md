@@ -1,6 +1,6 @@
 # Avancement du projet X6h Print
 
-*Mis à jour le 14/11/2026.*
+*Mis à jour le 17/11/2026.*
 
 Objectif : imprimer des photos sur la mini-imprimante thermique Bluetooth **X6h-FC21** sans l'appli Tiny Print, d'abord depuis l'iPhone (page web dans Bluefy), plus tard pour des invités via un relais (PC puis ESP32).
 
@@ -57,6 +57,19 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 
 1. Dans Bluefy (v13), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
 2. Essayer le bouton « 📲 Amis » avec un deuxième téléphone : scanner le QR code, envoyer une photo, l'imprimer. Essayer aussi avec l'ami en 4G/5G (pas sur le même Wi-Fi).
+
+### Rendu ASCII (v26)
+
+- Dans « Rendu », sous N&B / Gris : choix du **style** « 📷 Photo » (le tramage habituel) ou « 🔤 ASCII » : la photo est redessinée avec des caractères. Indépendant du mode : en N&B les caractères sont noirs et nets ; en Gris leurs bords adoucis passent en gris.
+- Réglages (visibles seulement en ASCII) :
+  - **Caractères sur la largeur du papier** (16 à 96, 48 par défaut) : peu = gros caractères lisibles, beaucoup = plus de détails. La taille est la même pour toutes les photos (une case de « 2 par ligne » en contient la moitié).
+  - **Caractères utilisés** : Classique (` .:-=+*#%@`), Détaillé (70 caractères), Blocs (`░▒▓█`), **Une phrase répétée** (la phrase est écrite en boucle là où la photo est foncée, en gras là où elle est très foncée), **Mes caractères** (n'importe lesquels, dans n'importe quel ordre).
+  - **Gras** (coché par défaut, plus lisible sur le papier) et **Fond noir** (caractères blancs sur fond noir ; beaucoup de noir, donc plus lent).
+- La noirceur de chaque caractère est mesurée en le dessinant (fonction `glyphRamp`) : chaque case de la photo reçoit le caractère qui noircit le plus pareil.
+- Luminosité, contraste et correction auto s'appliquent avant. Le texte sous la photo et la date restent écrits normalement. Une photo tournée est remise à l'endroit le temps d'écrire les caractères : ils se lisent dans le sens de la photo.
+- S'applique aussi aux photos des amis et au mode borne (la page des amis n'a pas encore l'option : leur aperçu reste en style Photo).
+- Code : `asciiArt`, `glyphRamp`, `rotateGrid`, `inkToLevel` dans `traitement.js`. Style et réglages gardés dans le téléphone.
+- Testé dans le navigateur du PC (aperçus : photo seule, tournée, série 2 par ligne, Gris + fond noir), pas encore sur papier.
 
 ### Sens d'impression (v14)
 
