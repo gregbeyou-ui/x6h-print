@@ -58,6 +58,19 @@ Dépôt GitHub (public) : https://github.com/gregbeyou-ui/x6h-print
 1. Dans Bluefy (v13), imprimer en Gris sans toucher aux réglages et vérifier le rendu.
 2. Essayer le bouton « 📲 Amis » avec un deuxième téléphone : scanner le QR code, envoyer une photo, l'imprimer. Essayer aussi avec l'ami en 4G/5G (pas sur le même Wi-Fi).
 
+### Suppression du fond (v27)
+
+- Case **« 🧍 Supprimer le fond (garde les personnes) »** sous Luminosité / Contraste, sur la page de l'imprimante **et** sur la page des amis. Tout ce qui n'est pas une personne devient blanc : rien ne chauffe le papier autour, la personne ressort mieux.
+- Outil : modèle **MediaPipe « Selfie segmenter »** de Google (environ 250 Ko, bibliothèque `@mediapipe/tasks-vision` **0.10.14**, chargée depuis jsDelivr ; modèle sur les serveurs de Google). Il est téléchargé **seulement quand on coche la case**, la première fois, puis gardé par le navigateur. L'analyse se fait **dans le téléphone** : la photo n'est envoyée nulle part.
+- Fonctionnement (`detourer` dans `traitement.js`) : la photo est analysée en petit (512 points), le modèle donne pour chaque point la probabilité qu'il soit une personne ; en dessous de 0,35 c'est du fond, au-dessus de 0,65 c'est la personne, entre les deux le passage est adouci (pas d'effet « découpé aux ciseaux »). La photo détourée (fond blanc pur) remplace la photo d'origine pour le dessin : recadrage, sens, série, 2 par ligne et ASCII marchent sans rien changer.
+- Le fond blanc ne compte pas dans la **correction auto** (sinon la personne sortait trop foncée) et reste blanc même avec une luminosité ou un contraste baissés (`reperFond`, `garderFondBlanc`).
+- Chaque photo n'est analysée qu'une fois (mémoire `detourages`). L'aperçu s'affiche d'abord avec le fond, puis se met à jour ; **avant d'imprimer, la page attend toujours la fin de l'analyse** (aussi en mode borne).
+- Messages sous la case : « Chargement de l'outil… (la première fois seulement) », « ✓ Fond supprimé », « Aucune personne trouvée sur cette photo : le fond est gardé » (moins de 3 % de personne), ou « Suppression du fond impossible » (pas d'internet) : dans ce cas la photo s'imprime avec son fond.
+- Limite : **personnes seulement** (pas les animaux ni les objets). Pour un sujet quelconque, l'astuce de l'iPhone (appui long sur le sujet dans Photos) reste possible.
+- Page des amis : l'ami coche la case et voit l'aperçu sans fond ; le choix part avec la photo (réglage `fond`), et la page de l'imprimante (ou la borne) refait le détourage sur la photo reçue.
+- Le choix est gardé dans le téléphone (comme la correction auto).
+- Testé dans Chrome sur le PC avec un **faux modèle** (photo seule, Gris, ASCII, luminosité −80, série, photo d'ami, photo sans personne, échec de chargement). Le vrai modèle n'a pas pu être essayé ici : **à vérifier sur l'iPhone** (test 10).
+
 ### Rendu ASCII (v26)
 
 - Dans « Rendu », sous N&B / Gris : choix du **style** « 📷 Photo » (le tramage habituel) ou « 🔤 ASCII » : la photo est redessinée avec des caractères. Indépendant du mode : en N&B les caractères sont noirs et nets ; en Gris leurs bords adoucis passent en gris.

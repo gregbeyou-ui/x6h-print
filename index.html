@@ -194,6 +194,9 @@
       <label class="check small"><input type="checkbox" id="autoEnhance" checked> ✨ Correction auto</label>
       <button class="secondary small" id="resetLook" hidden>↺ Remettre à zéro</button>
     </div>
+    <!-- v27 : suppression du fond (personnes seulement) -->
+    <label class="check small"><input type="checkbox" id="removeBg"> 🧍 Supprimer le fond (garde les personnes)</label>
+    <div class="hint" id="fondHint"></div>
   </div>
 
   <!-- ③ Imprimer -->
@@ -321,7 +324,7 @@ const GRAY_CHUNK_LINES = 20; // lignes par paquet en mode gris (comme Tiny Print
 // et laisse une ligne blanche tous les 2,5 mm.
 const GRAY_PACKET_PAUSES = { rapide: 0, normal: 15, lent: 60 };
 const HEADER_PACKETS = 4;    // les 4 premiers paquets d'une impression sont les réglages
-const VERSION = '17/11 – v26';
+const VERSION = '17/11 – v27';
 
 // Rythme d'envoi Bluetooth : attente (ms) après chaque envoi de 177 octets au plus.
 // L'iPhone jette sans prévenir ce qu'on lui envoie trop vite : on y va plus lentement.
@@ -695,7 +698,7 @@ function photoCell(img, cr, rot, cellW) {
   g.translate(cellW / 2, H / 2);
   g.rotate(rot * Math.PI / 180);
   const dw = turned ? H : cellW, dh = turned ? cellW : H;
-  g.drawImage(img, s.x, s.y, s.w, s.h, -dw / 2, -dh / 2, dw, dh);
+  g.drawImage(dessin(img), s.x, s.y, s.w, s.h, -dw / 2, -dh / 2, dw, dh);
   c.rot = rot;   // retenu pour le rendu ASCII (caractères à l'endroit de la photo)
   return c;
 }
@@ -759,8 +762,58 @@ function layoutSeries(caption, stampH) {
   return { photoH, regions, asciiRegions: regions };
 }
 
+/* ---------------------------------------------------------------------
+   SUPPRESSION DU FOND (v27) — le calcul est dans traitement.js.
+   L'analyse prend un petit moment : on dessine d'abord la photo telle quelle,
+   on lance l'analyse en arrière-plan, puis on redessine quand elle est finie.
+   Avant d'imprimer, on attend toujours qu'elle soit finie.
+   --------------------------------------------------------------------- */
+function fondActif() { return document.getElementById('removeBg').checked; }
+// Photos qui composent le ticket en ce moment
+function imagesUtilisees() { return isSeries() ? batch.map(b => b.img) : sourceImg ? [sourceImg] : []; }
+// Image à dessiner : sans fond si la case est cochée (et l'analyse finie)
+function dessin(img) { return fondActif() ? imageDetouree(img) : img; }
+
+let fondEnCours = false;
+let fondErreur = '';   // message si l'outil n'a pas pu se charger (on ne réessaie pas en boucle)
+async function preparerFond() {
+  const hint = document.getElementById('fondHint');
+  if (!fondActif()) { hint.textContent = ''; return; }
+  if (fondErreur) { hint.textContent = fondErreur; return; }
+  const manquent = imagesUtilisees().filter(i => !detourageFait(i));
+  if (!manquent.length) { afficherFondHint(); return; }
+  if (fondEnCours) return;
+  fondEnCours = true;
+  hint.textContent = segmenteurCharge() ? '✂️ Suppression du fond…'
+                                        : '✂️ Chargement de l\'outil de détourage (la première fois seulement)…';
+  try {
+    for (const i of manquent) await detourerEnMemoire(i);
+  } catch (e) {
+    console.warn('Détourage impossible', e);
+    fondErreur = '⚠️ Suppression du fond impossible (internet nécessaire la première fois). Le fond est gardé. Décoche puis recoche la case pour réessayer.';
+  } finally { fondEnCours = false; }
+  render();   // on redessine avec les photos sans fond
+}
+function afficherFondHint() {
+  const imgs = imagesUtilisees();
+  const sans = imgs.filter(i => { const r = detourageResultat(i); return r && !r.image; }).length;
+  document.getElementById('fondHint').textContent =
+    !sans ? '✓ Fond supprimé : seules les personnes sont gardées.'
+    : imgs.length === 1 ? 'Aucune personne trouvée sur cette photo : le fond est gardé.'
+    : `✓ Fond supprimé. ${sans} photo${sans > 1 ? 's' : ''} sans personne : fond gardé.`;
+}
+// Avant d'imprimer : on attend la fin de l'analyse, puis on redessine le ticket
+async function attendreFond() {
+  if (!fondActif() || fondErreur) return;
+  try { for (const i of imagesUtilisees()) await detourerEnMemoire(i); }
+  catch (e) { fondErreur = '⚠️ Suppression du fond impossible : imprimé avec le fond.'; }
+  render();
+}
+document.getElementById('removeBg').onchange = () => { fondErreur = ''; render(); scheduleSave(); };
+
 function render() {
   if (!sourceImg) return;
+  preparerFond();   // lance l'analyse si besoin (sans attendre)
   const caption = document.getElementById('caption').value.trim();
   const stamp = stampText();
   const stampH = stamp ? 30 : 0;
@@ -817,7 +870,7 @@ function layoutSingle(caption, stampH) {
   }
   const c2 = comp.getContext('2d');
   c2.fillStyle = '#fff'; c2.fillRect(0, 0, comp.width, comp.height);
-  c2.drawImage(sourceImg, src.x, src.y, src.w, src.h, 0, 0, imgW, imgH);
+  c2.drawImage(dessin(sourceImg), src.x, src.y, src.w, src.h, 0, 0, imgW, imgH);
   if (caption) {
     c2.fillStyle = '#000'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
     c2.font = 'bold 26px -apple-system, system-ui, sans-serif';
@@ -857,17 +910,26 @@ function finishRender(photoH, regions, stamp, stampH, asciiRegions = regions) {
   // 1) niveaux de gris, amélioration automatique, puis luminosité + contraste réglés à la main
   const gray = new Float32Array(WIDTH * height);
   for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
+  // Fond supprimé (v27) : on repère le blanc pur du fond, qui ne doit ni fausser la
+  // correction auto, ni être grisé par la luminosité ou le contraste
+  const fond = fondActif() ? reperFond(gray) : null;
   if (document.getElementById('autoEnhance').checked) {
     // chaque photo est améliorée séparément (une photo sombre à côté d'une claire)
     for (const r of regions) {
       const part = new Float32Array(r.w * r.h);
       for (let y = 0; y < r.h; y++) part.set(gray.subarray((r.y + y) * WIDTH + r.x, (r.y + y) * WIDTH + r.x + r.w), y * r.w);
-      enhance(part, r.w, r.h, MODES[mode].gray ? ENHANCE.gris : ENHANCE.nb);
+      let partFond = null;
+      if (fond) {
+        partFond = new Uint8Array(r.w * r.h);
+        for (let y = 0; y < r.h; y++) partFond.set(fond.subarray((r.y + y) * WIDTH + r.x, (r.y + y) * WIDTH + r.x + r.w), y * r.w);
+      }
+      enhance(part, r.w, r.h, MODES[mode].gray ? ENHANCE.gris : ENHANCE.nb, partFond);
       for (let y = 0; y < r.h; y++) gray.set(part.subarray(y * r.w, (y + 1) * r.w), (r.y + y) * WIDTH + r.x);
     }
   }
   for (let i = 0; i < gray.length; i++)
     gray[i] = Math.max(0, Math.min(255, k * (gray[i] - 128) + 128 + bright));
+  if (fond) garderFondBlanc(gray, fond);
   // Style ASCII : chaque photo est redessinée en caractères (calculé avant le tramage,
   // qui modifie le tableau gray). Le résultat remplace la photo tramée plus bas.
   // Une photo tournée est remise à l'endroit le temps d'écrire les caractères,
@@ -1000,6 +1062,7 @@ async function saveState() {
     bright: document.getElementById('bright').value,
     contrast: document.getElementById('contrast').value,
     autoEnhance: document.getElementById('autoEnhance').checked,
+    removeBg: fondActif(),
     style, ascii: { ...asciiOptions(), texts: { ...asciiTexts } },
     kind,
     crop: kind === 'single' || kind === 'guest' ? crop : null,
@@ -1032,6 +1095,7 @@ async function restoreState() {
     }
     showResetLook();
     document.getElementById('autoEnhance').checked = st.autoEnhance !== false;
+    document.getElementById('removeBg').checked = !!st.removeBg;
     // Style ASCII et ses réglages
     if (st.ascii) {
       const a = st.ascii;
@@ -1183,6 +1247,8 @@ async function print() {
   printing = true; updateButtons();
   const bar = document.getElementById('bar');
   try {
+    // Fond à supprimer : on attend la fin de l'analyse (sinon le fond partirait à l'impression)
+    if (fondActif()) { setPrint(printLabel + '✂️ Suppression du fond…'); await attendreFond(); }
     await ensureConnected();
     // Avant d'imprimer, on demande son état à l'imprimante (pour le rapport de fin)
     const before = await askState();
@@ -1637,11 +1703,11 @@ function cleanLook(l) {
   if (!l || typeof l !== 'object') return null;
   const n = v => Math.max(-100, Math.min(100, Math.round(+v || 0)));
   return { bright: n(l.bright), contrast: n(l.contrast), auto: l.auto !== false,
-           mode: MODES[l.mode] ? l.mode : null };
+           fond: !!l.fond, mode: MODES[l.mode] ? l.mode : null };
 }
 function currentLook() {
   return { bright: +document.getElementById('bright').value, contrast: +document.getElementById('contrast').value,
-           auto: document.getElementById('autoEnhance').checked, mode };
+           auto: document.getElementById('autoEnhance').checked, fond: fondActif(), mode };
 }
 function applyLookToSliders(l) {
   if (!l) return;
@@ -1651,6 +1717,7 @@ function applyLookToSliders(l) {
     document.getElementById(id + 'Val').textContent = l[id];
   }
   document.getElementById('autoEnhance').checked = l.auto;
+  document.getElementById('removeBg').checked = !!l.fond;   // fond supprimé ou non, au choix de l'ami
   showResetLook();
 }
 

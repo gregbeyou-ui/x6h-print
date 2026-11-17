@@ -32,6 +32,7 @@
   .modes { display:flex; gap:10px; margin-top:4px; }
   .modes button { flex:1; padding:12px 6px; font-size:15px; }
   .modes button.secondary { background:#e8e6e0; color:var(--ink); }
+  .fondHint { color:var(--muted); font-size:13px; margin-top:6px; }
   .modeLabel { text-align:center; color:var(--muted); font-size:13px; margin-top:-4px; }
   .empty { color:var(--muted); font-size:14px; }
   #status { font-size:14px; color:var(--muted); margin-top:10px; text-align:center; line-height:1.4; }
@@ -42,7 +43,7 @@
 <body>
 <main>
   <h1>📲 Envoyer une photo</h1>
-  <p class="intro">Ta photo part vers l'imprimante et sort sur un petit ticket. Règle la luminosité et le contraste : l'aperçu montre le ticket tel qu'il sera imprimé.</p>
+  <p class="intro">Ta photo part vers l'imprimante et sort sur un petit ticket. Règle la luminosité et le contraste (et supprime le fond si tu veux) : l'aperçu montre le ticket tel qu'il sera imprimé.</p>
 
   <div class="card">
     <label class="field" for="from">Ton prénom (optionnel)</label>
@@ -67,6 +68,10 @@
         <label class="check"><input type="checkbox" id="autoEnhance" checked> ✨ Correction auto</label>
         <button class="small" id="resetLook" hidden>↺ Remettre à zéro</button>
       </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="removeBg"> 🧍 Supprimer le fond (garde les personnes)</label>
+      </div>
+      <div class="fondHint" id="fondHint"></div>
     </div>
     <div style="height:12px"></div>
     <button id="sendBtn" disabled>Envoyer</button>
@@ -183,11 +188,37 @@ function lookNow() {
     bright: +document.getElementById('bright').value,
     contrast: +document.getElementById('contrast').value,
     auto: document.getElementById('autoEnhance').checked,
+    fond: document.getElementById('removeBg').checked,
   };
 }
 
+/* Suppression du fond (v27, calcul dans traitement.js) : l'analyse prend un petit
+   moment. L'aperçu montre d'abord la photo telle quelle, puis se met à jour. */
+let fondEnCours = false, fondErreur = '';
+async function preparerFond() {
+  const hint = document.getElementById('fondHint');
+  if (!photoImg || !document.getElementById('removeBg').checked) { hint.textContent = ''; return; }
+  if (fondErreur) { hint.textContent = fondErreur; return; }
+  const r = detourageResultat(photoImg);
+  if (r) {
+    hint.textContent = r.image ? '✓ Fond supprimé : seules les personnes sont gardées.'
+                               : 'Aucune personne trouvée sur cette photo : le fond est gardé.';
+    return;
+  }
+  if (fondEnCours) return;
+  fondEnCours = true;
+  hint.textContent = segmenteurCharge() ? '✂️ Suppression du fond…'
+                                        : '✂️ Chargement de l\'outil de détourage (la première fois seulement)…';
+  try { await detourerEnMemoire(photoImg); }
+  catch (e) { console.warn(e); fondErreur = '⚠️ Suppression du fond impossible pour le moment. Décoche puis recoche la case pour réessayer.'; }
+  finally { fondEnCours = false; }
+  renderPreview();
+}
+document.getElementById('removeBg').onchange = () => { fondErreur = ''; renderPreview(); saveLook(); };
+
 let previewPending = false;
 function renderPreview() {
+  preparerFond();   // lance la suppression du fond si besoin (sans attendre) et met le message à jour
   if (!photoImg || previewPending) return;
   previewPending = true;
   requestAnimationFrame(() => {               // un seul calcul par image affichée, même si on glisse vite
@@ -199,7 +230,7 @@ function renderPreview() {
     c.width = w; c.height = h;
     const g = c.getContext('2d', { willReadFrequently: true });
     g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
-    g.drawImage(photoImg, 0, 0, w, h);
+    g.drawImage(document.getElementById('removeBg').checked ? imageDetouree(photoImg) : photoImg, 0, 0, w, h);
     const d = g.getImageData(0, 0, w, h), px = d.data;
     const gray = new Float32Array(w * h);
     for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
@@ -234,6 +265,7 @@ try {
     document.getElementById('bright').value = l.bright; document.getElementById('brightVal').textContent = l.bright;
     document.getElementById('contrast').value = l.contrast; document.getElementById('contrastVal').textContent = l.contrast;
     document.getElementById('autoEnhance').checked = l.auto !== false;
+    document.getElementById('removeBg').checked = !!l.fond;
     if (l.mode === 'nb' || l.mode === 'gris') myMode = l.mode;
     showReset();
   }

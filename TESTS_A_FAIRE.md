@@ -1,6 +1,6 @@
 # Tests à faire (17/11/2026)
 
-Tests 1 à 7 : sur l'iPhone, dans Bluefy. Test 8 : sur le PC. Avant de commencer : recharger la page et vérifier qu'il est écrit **v22** (ou plus) tout en bas.
+Tests 1 à 7, 9 et 10 : sur l'iPhone, dans Bluefy. Test 8 : sur le PC. Avant de commencer : recharger la page et vérifier qu'il est écrit **v22** (ou plus) tout en bas.
 
 Pour chaque test, noter **OK** ou ce qui ne va pas. En cas de problème, recopier le **message de fin** en entier.
 
@@ -108,3 +108,22 @@ Vérifier qu'il est écrit **v26** tout en bas de la page. Choisir une photo ave
 - [ ] Les caractères `░▒▓` des Blocs s'affichent-ils bien dans Bluefy (pas de carrés vides) ?
 - [ ] Fond noir : le noir est-il régulier, sans bandes blanches ? Durée (message de fin) :
 - [ ] Photo en largeur (tournée) : les caractères sont-ils dans le sens de la photo ?
+
+## 10. Supprimer le fond (v27)
+
+Vérifier qu'il est écrit **v27** tout en bas de la page. Il faut internet la première fois (téléchargement de l'outil).
+
+1. Choisir une photo avec **une personne** devant un fond chargé (pièce, rue). Cocher **🧍 Supprimer le fond**. Noter le temps avant « ✓ Fond supprimé » (la première fois, puis avec une 2e photo).
+2. Imprimer en **N&B**, puis en **Gris**.
+3. Essayer une photo de **groupe** (3 personnes ou plus) et une photo **sans personne** (paysage, chat).
+4. Essayer avec **🔤 ASCII**.
+5. Page des amis : avec un 2e téléphone, cocher la case avant d'envoyer, regarder l'aperçu, envoyer, imprimer.
+
+À noter :
+- [ ] L'outil se charge-t-il dans Bluefy ? (sinon, recopier le message sous la case)
+- [ ] Temps d'attente : première fois __ s, photo suivante __ s
+- [ ] Les contours sont-ils propres (cheveux, mains) ? Des morceaux de fond restent-ils ? Des morceaux de la personne disparaissent-ils ?
+- [ ] La personne est-elle bien exposée (pas trop foncée ni trop claire) par rapport au même ticket avec le fond ?
+- [ ] Groupe : tout le monde est-il gardé ?
+- [ ] Sans personne : message « Aucune personne trouvée », et la photo s'imprime avec son fond ?
+- [ ] Page des amis : le ticket ressemble-t-il à l'aperçu de l'ami ?

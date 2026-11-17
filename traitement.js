@@ -53,24 +53,34 @@ const ENHANCE = {
   nb:   { clip: 0.01,  mean: 0.55, sharpen: 0.9 },
   gris: { clip: 0.003, mean: 0.58, sharpen: 0.35 },
 };
-function enhance(gray, w, h, opt = ENHANCE.nb) {
+// fond (facultatif, v27) : tableau qui vaut 1 pour les points du fond supprimé.
+// Ces points ne comptent pas dans les mesures (sinon tout ce blanc ferait croire
+// que la photo est très claire, et la personne sortirait trop foncée).
+function enhance(gray, w, h, opt = ENHANCE.nb, fond = null) {
   const n = w * h;
   if (!n) return;
+  let compte = n;                                   // nombre de points mesurés
+  if (fond) {
+    compte = 0;
+    for (let i = 0; i < n; i++) if (!fond[i]) compte++;
+    if (compte < n * 0.02) { fond = null; compte = n; }   // presque tout est du fond : on mesure tout
+  }
   // a) étirement des niveaux
   const hist = new Uint32Array(256);
-  for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, gray[i] | 0))]++;
+  for (let i = 0; i < n; i++) if (!fond || !fond[i]) hist[Math.max(0, Math.min(255, gray[i] | 0))]++;
   let lo = 0, hi = 255, acc = 0;
-  while (lo < 255 && (acc += hist[lo]) < n * opt.clip) lo++;
+  while (lo < 255 && (acc += hist[lo]) < compte * opt.clip) lo++;
   acc = 0;
-  while (hi > 0 && (acc += hist[hi]) < n * opt.clip) hi--;
+  while (hi > 0 && (acc += hist[hi]) < compte * opt.clip) hi--;
   if (hi - lo < 32) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 16); hi = Math.min(255, mid + 16); }
   let sum = 0;
   for (let i = 0; i < n; i++) {
     const v = Math.max(0, Math.min(255, (gray[i] - lo) * 255 / (hi - lo)));
-    gray[i] = v; sum += v;
+    gray[i] = v;
+    if (!fond || !fond[i]) sum += v;
   }
   // b) tons moyens : on amène la moyenne de la photo vers la clarté visée pour ce mode
-  const mean = Math.max(0.05, Math.min(0.95, sum / n / 255));
+  const mean = Math.max(0.05, Math.min(0.95, sum / compte / 255));
   const gamma = Math.max(0.6, Math.min(1.7, Math.log(opt.mean) / Math.log(mean)));
   if (Math.abs(gamma - 1) > 0.03)
     for (let i = 0; i < n; i++) gray[i] = 255 * Math.pow(gray[i] / 255, gamma);
@@ -270,8 +280,12 @@ function applyLook(gray, bright, contrast) {
    gris → amélioration automatique (si auto) → luminosité / contraste → tramage.
    isGray : mode Gris (sinon N&B). Renvoie l'aperçu (gris 0 à 255 par point). */
 function processPhoto(gray, w, h, isGray, look) {
-  if (look.auto) enhance(gray, w, h, isGray ? ENHANCE.gris : ENHANCE.nb);
+  // Fond supprimé (v27) : la photo arrive déjà avec un fond blanc pur ; on le repère
+  // pour qu'il ne fausse pas la correction auto, puis on le remet bien blanc à la fin.
+  const fond = look.fond ? reperFond(gray) : null;
+  if (look.auto) enhance(gray, w, h, isGray ? ENHANCE.gris : ENHANCE.nb, fond);
   applyLook(gray, look.bright, look.contrast);
+  if (fond) garderFondBlanc(gray, fond);
   const out = new Uint8ClampedArray(w * h);
   if (isGray) {
     const lv = toLevels(gray, w, h);
@@ -282,4 +296,121 @@ function processPhoto(gray, w, h, isGray, look) {
     for (let i = 0; i < b.length; i++) out[i] = b[i] ? 0 : 255;
   }
   return out;
+}
+/* =====================================================================
+   SUPPRESSION DU FOND (v27) : on ne garde que la ou les personnes.
+   Un petit modèle d'intelligence artificielle de Google (MediaPipe « Selfie
+   segmenter », environ 250 Ko) regarde la photo et donne, pour chaque point,
+   la probabilité qu'il appartienne à une personne. Tout le reste devient blanc :
+   sur le papier thermique, le blanc ne chauffe pas, la personne ressort mieux.
+   - Tout se passe dans le téléphone : la photo n'est envoyée nulle part.
+   - L'outil n'est téléchargé que la première fois qu'on coche la case, puis le
+     navigateur le garde en mémoire.
+   - Il ne reconnaît que les personnes (pas les animaux ni les objets).
+   ===================================================================== */
+const FOND_LIB = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const FOND_MODELE = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+const FOND_TAILLE = 512;       // la photo est réduite à 512 points pour l'analyse (le modèle travaille en 256)
+const FOND_MINI = 0.03;        // moins de 3 % de personne sur la photo : on considère qu'il n'y en a pas
+
+// Chargement de l'outil, une seule fois (les appels suivants attendent le même chargement)
+let segmenteurPromesse = null;
+function obtenirSegmenteur() {
+  if (!segmenteurPromesse) {
+    segmenteurPromesse = (async () => {
+      const { FilesetResolver, ImageSegmenter } = await import(FOND_LIB + '/vision_bundle.mjs');
+      const fichiers = await FilesetResolver.forVisionTasks(FOND_LIB + '/wasm');
+      return ImageSegmenter.createFromOptions(fichiers, {
+        baseOptions: { modelAssetPath: FOND_MODELE, delegate: 'CPU' },  // CPU : marche partout, même dans Bluefy
+        runningMode: 'IMAGE',
+        outputConfidenceMasks: true,
+        outputCategoryMask: false,
+      });
+    })();
+    // En cas d'échec (pas d'internet…), on pourra réessayer plus tard
+    segmenteurPromesse.catch(() => { segmenteurPromesse = null; });
+  }
+  return segmenteurPromesse;
+}
+function segmenteurCharge() { return !!segmenteurPromesse; }
+
+/* Détoure une image (photo ou canvas). Renvoie { image, part } :
+   - image : un canvas de la même taille que la photo, personne gardée, fond blanc
+     (null si aucune personne n'a été trouvée) ;
+   - part : la part de la photo occupée par des personnes (0 à 1). */
+async function detourer(img) {
+  const seg = await obtenirSegmenteur();
+  const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+  // 1) analyse sur une copie réduite (rapide)
+  const k = Math.min(1, FOND_TAILLE / Math.max(W, H));
+  const petit = document.createElement('canvas');
+  petit.width = Math.max(1, Math.round(W * k)); petit.height = Math.max(1, Math.round(H * k));
+  petit.getContext('2d').drawImage(img, 0, 0, petit.width, petit.height);
+  const res = seg.segment(petit);
+  const masques = res.confidenceMasks || [];
+  // Avec ce modèle, le dernier masque est celui des personnes (s'il y en a deux,
+  // le premier est celui du fond)
+  const m = masques[masques.length - 1];
+  if (!m) { res.close(); throw new Error('aucun résultat'); }
+  const mw = m.width, mh = m.height;
+  const proba = m.getAsFloat32Array().slice();      // copie : le résultat est libéré juste après
+  res.close();
+  // 2) masque adouci : en dessous de 0,35 c'est du fond, au-dessus de 0,65 c'est la
+  //    personne, entre les deux on passe en douceur (pas d'effet « découpé aux ciseaux »)
+  const mc = document.createElement('canvas'); mc.width = mw; mc.height = mh;
+  const g = mc.getContext('2d');
+  const d = g.createImageData(mw, mh);
+  let somme = 0;
+  for (let i = 0; i < proba.length; i++) {
+    const t = Math.max(0, Math.min(1, (proba[i] - 0.35) / 0.3));
+    const a = t * t * (3 - 2 * t);
+    somme += a;
+    d.data[i * 4 + 3] = Math.round(255 * a);
+  }
+  g.putImageData(d, 0, 0);
+  const part = somme / proba.length;
+  if (part < FOND_MINI) return { image: null, part };
+  // 3) photo en taille réelle, découpée par le masque (agrandi en douceur), puis posée sur du blanc
+  const decoupe = document.createElement('canvas'); decoupe.width = W; decoupe.height = H;
+  const g2 = decoupe.getContext('2d');
+  g2.drawImage(img, 0, 0, W, H);
+  g2.globalCompositeOperation = 'destination-in';   // on ne garde la photo que là où le masque est plein
+  g2.imageSmoothingEnabled = true;
+  g2.drawImage(mc, 0, 0, W, H);
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const g3 = out.getContext('2d');
+  g3.fillStyle = '#fff'; g3.fillRect(0, 0, W, H);
+  g3.drawImage(decoupe, 0, 0);
+  return { image: out, part };
+}
+
+// Mémoire des détourages : chaque photo n'est analysée qu'une fois
+const detourages = new WeakMap();      // image → promesse du résultat
+const detouragesFaits = new WeakMap(); // image → résultat (une fois prêt)
+function detourerEnMemoire(img) {
+  if (!detourages.has(img)) {
+    const p = detourer(img).then(r => { detouragesFaits.set(img, r); return r; });
+    p.catch(() => detourages.delete(img));   // échec : on pourra réessayer
+    detourages.set(img, p);
+  }
+  return detourages.get(img);
+}
+// Image à dessiner : la version sans fond si elle est prête, sinon la photo d'origine
+function imageDetouree(img) {
+  const r = detouragesFaits.get(img);
+  return r && r.image ? r.image : img;
+}
+function detourageFait(img) { return detouragesFaits.has(img); }
+function detourageResultat(img) { return detouragesFaits.get(img) || null; }
+
+// Repère les points du fond : ceux qui sont d'un blanc pur (le fond supprimé est
+// peint en blanc pur ; un point blanc de la personne compté avec ne gêne pas)
+function reperFond(gray) {
+  const fond = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) fond[i] = gray[i] >= 254 ? 1 : 0;
+  return fond;
+}
+// Après luminosité et contraste, le fond redevient blanc pur (rien ne s'imprime dessus)
+function garderFondBlanc(gray, fond) {
+  for (let i = 0; i < gray.length; i++) if (fond[i]) gray[i] = 255;
 }
